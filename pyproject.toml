@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 research-normalizer = "research_normalizer.cli:main"
+research-normalizer-web = "research_normalizer.web.server:main"
 
 [build-system]
 requires = ["hatchling"]
