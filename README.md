@@ -1,5 +1,8 @@
 # Research Normalizer
 
+**Team name:** Amek
+**Project title:** Research Normalizer: turning research data repositories into one standardized, validated JSON document
+
 Research Normalizer is a Python tool that converts research data repositories into a standardized and validated JSON document.
 
 It can process repositories containing CSV, TSV, TAB, Excel, and README files. The tool reads the documentation and data, matches documented variables to data columns, validates the results, and reports any issues it finds.
@@ -50,6 +53,16 @@ For more options:
 
     research-normalizer --help
 
+## Review Dashboard
+
+A local web dashboard runs the same pipeline in the browser, shows each stage, and lets a person review uncertain matches, correct variables against the original README and data, and export the reviewed JSON:
+
+    research-normalizer-web
+
+Then open http://127.0.0.1:8765. It has no login and only listens on your own machine.
+
+How all the pieces fit together is described in docs/PROCESS_MAP.md.
+
 ## Python Usage
 
 The pipeline can also be used directly in Python:
@@ -94,7 +107,8 @@ The JSON Schema used to validate the output is located in:
     ├── linking.py
     ├── assemble.py
     ├── pipeline.py
-    └── cli.py
+    ├── cli.py
+    └── web/            (review dashboard: server + static frontend)
 
     tests/
     benchmarks/
@@ -120,5 +134,6 @@ Run the benchmark:
 More detailed information can be found in:
 
 - docs/DESIGN.md — project design and architecture
+- docs/PROCESS_MAP.md — diagrams of how the pipeline and dashboard work
 - docs/SOURCES.md — research sources
 - schemas/research_repository.schema.json — output schema
