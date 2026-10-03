@@ -1,0 +1,1527 @@
+{
+  "$defs": {
+    "ColumnRole": {
+      "description": "A coarse hint about how a column is used, for display and matching context.",
+      "enum": [
+        "identifier",
+        "categorical",
+        "measure",
+        "temporal",
+        "text"
+      ],
+      "title": "ColumnRole",
+      "type": "string"
+    },
+    "ColumnStatistics": {
+      "description": "One-pass profile of a column (DESIGN.md section 13).",
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "distinct": {
+          "title": "Distinct",
+          "type": "integer"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "missing": {
+          "title": "Missing",
+          "type": "integer"
+        },
+        "std": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Std"
+        },
+        "top_values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Top Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "count",
+        "missing",
+        "distinct"
+      ],
+      "title": "ColumnStatistics",
+      "type": "object"
+    },
+    "ColumnType": {
+      "description": "Logical column types, a readable subset of Frictionless Table Schema (Ref [14]).",
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "date",
+        "datetime",
+        "time"
+      ],
+      "title": "ColumnType",
+      "type": "string"
+    },
+    "Dataset": {
+      "description": "One data table (one CSV/TAB file, or one Excel sheet).",
+      "properties": {
+        "column_count": {
+          "title": "Column Count",
+          "type": "integer"
+        },
+        "declared": {
+          "$ref": "#/$defs/DeclaredCounts"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "documented_as": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Documented As"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "headers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "last_updated": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Updated"
+        },
+        "records": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "records_included": {
+          "default": 0,
+          "title": "Records Included",
+          "type": "integer"
+        },
+        "records_truncated": {
+          "default": false,
+          "title": "Records Truncated",
+          "type": "boolean"
+        },
+        "row_count": {
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "structure": {
+          "$ref": "#/$defs/DatasetStructure"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "unmatched_documented_variables": {
+          "items": {
+            "$ref": "#/$defs/UnmatchedVariable"
+          },
+          "title": "Unmatched Documented Variables",
+          "type": "array"
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/$defs/Variable"
+          },
+          "title": "Variables",
+          "type": "array"
+        },
+        "worksheet_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worksheet Name"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "format",
+        "structure",
+        "row_count",
+        "column_count"
+      ],
+      "title": "Dataset",
+      "type": "object"
+    },
+    "DatasetStructure": {
+      "description": "How the physical table was read (DESIGN.md sections 10, 12).",
+      "properties": {
+        "delimiter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delimiter"
+        },
+        "encoding": {
+          "title": "Encoding",
+          "type": "string"
+        },
+        "header_confidence": {
+          "default": 1.0,
+          "title": "Header Confidence",
+          "type": "number"
+        },
+        "header_row": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Header Row"
+        },
+        "quote_char": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote Char"
+        }
+      },
+      "required": [
+        "encoding"
+      ],
+      "title": "DatasetStructure",
+      "type": "object"
+    },
+    "DateRange": {
+      "description": "A collection period. ``text`` always preserves the original string.",
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "DateRange",
+      "type": "object"
+    },
+    "DeclaredCounts": {
+      "description": "Counts the README claimed, kept so we can cross-check them (DESIGN.md section 13).",
+      "properties": {
+        "row_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Count"
+        },
+        "variable_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variable Count"
+        }
+      },
+      "title": "DeclaredCounts",
+      "type": "object"
+    },
+    "DocumentInfo": {
+      "description": "A documentation file we parsed and which datasets it describes.",
+      "properties": {
+        "describes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Describes",
+          "type": "array"
+        },
+        "encoding": {
+          "title": "Encoding",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/DocumentSection"
+          },
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "format",
+        "encoding"
+      ],
+      "title": "DocumentInfo",
+      "type": "object"
+    },
+    "DocumentSection": {
+      "properties": {
+        "lines": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Lines",
+          "type": "array"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "title": "DocumentSection",
+      "type": "object"
+    },
+    "FileRecord": {
+      "description": "One file found in the repository and what became of it.",
+      "properties": {
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "tabular",
+            "documentation",
+            "other"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "processed",
+            "skipped",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "role",
+        "format",
+        "size_bytes",
+        "sha256",
+        "status"
+      ],
+      "title": "FileRecord",
+      "type": "object"
+    },
+    "Issue": {
+      "description": "One categorized, explainable problem.",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/IssueCode"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IssueLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggestion"
+        },
+        "technical_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Technical Detail"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "title": "Issue",
+      "type": "object"
+    },
+    "IssueCode": {
+      "description": "Catalogue of everything that can go wrong, grouped by stage.",
+      "enum": [
+        "INPUT_NOT_FOUND",
+        "NO_FILES_FOUND",
+        "FILE_TOO_LARGE",
+        "TOO_MANY_FILES",
+        "UNSUPPORTED_FILE",
+        "ZIP_UNSAFE_MEMBER",
+        "ZIP_LIMIT_EXCEEDED",
+        "ENCODING_FALLBACK",
+        "ENCODING_REPLACED_CHARS",
+        "README_NOT_FOUND",
+        "README_MULTIPLE",
+        "README_UNREADABLE",
+        "CONFLICTING_METADATA",
+        "CSV_RAGGED_ROWS",
+        "CSV_QUOTE_FALLBACK",
+        "CSV_PARSE_FAILED",
+        "DELIMITER_UNCERTAIN",
+        "EXCEL_CORRUPT",
+        "EXCEL_HIDDEN_SHEET",
+        "EXCEL_EMPTY_SHEET",
+        "EXCEL_FORMULA_NO_CACHED_VALUE",
+        "HEADER_NOT_FOUND",
+        "HEADER_AMBIGUOUS",
+        "HEADER_DUPLICATE",
+        "HEADER_BLANK",
+        "AMBIGUOUS_DATE_FORMAT",
+        "POSSIBLE_UNDECLARED_MISSING_CODE",
+        "DECLARED_COUNT_MISMATCH",
+        "MATCH_AMBIGUOUS",
+        "MATCH_LOW_CONFIDENCE",
+        "VARIABLE_UNDOCUMENTED",
+        "DOCUMENTED_VARIABLE_NOT_IN_DATA",
+        "SCHEMA_VALIDATION_FAILED",
+        "INTERNAL_ERROR"
+      ],
+      "title": "IssueCode",
+      "type": "string"
+    },
+    "IssueLocation": {
+      "description": "Where a problem lives, so a user (or a future GUI) can jump straight to it.",
+      "properties": {
+        "column": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lines"
+        },
+        "sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sheet"
+        }
+      },
+      "title": "IssueLocation",
+      "type": "object"
+    },
+    "KeyValue": {
+      "description": "A README key/value we kept but did not map to a canonical field (nothing is dropped).",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "KeyValue",
+      "type": "object"
+    },
+    "MatchAlternative": {
+      "properties": {
+        "confidence": {
+          "title": "Confidence",
+          "type": "number"
+        },
+        "documented_name": {
+          "title": "Documented Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "documented_name",
+        "confidence"
+      ],
+      "title": "MatchAlternative",
+      "type": "object"
+    },
+    "MatchStatus": {
+      "enum": [
+        "matched",
+        "ambiguous",
+        "unmatched"
+      ],
+      "title": "MatchStatus",
+      "type": "string"
+    },
+    "MethodologyNote": {
+      "properties": {
+        "heading": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heading"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "MethodologyNote",
+      "type": "object"
+    },
+    "Person": {
+      "description": "An author/investigator/contact parsed from the README (DataCite 'creator', Ref [17]).",
+      "properties": {
+        "affiliation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Affiliation"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "orcid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Orcid"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Person",
+      "type": "object"
+    },
+    "Processing": {
+      "properties": {
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "schema_version": {
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "stage_durations_ms": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Stage Durations Ms",
+          "type": "object"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "tool_version": {
+          "title": "Tool Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_version",
+        "schema_version"
+      ],
+      "title": "Processing",
+      "type": "object"
+    },
+    "Project": {
+      "description": "Repository-level metadata, mostly from the README(s).",
+      "properties": {
+        "additional_fields": {
+          "items": {
+            "$ref": "#/$defs/KeyValue"
+          },
+          "title": "Additional Fields",
+          "type": "array"
+        },
+        "citation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citation"
+        },
+        "collection_period": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DateRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contacts": {
+          "items": {
+            "$ref": "#/$defs/Person"
+          },
+          "title": "Contacts",
+          "type": "array"
+        },
+        "creators": {
+          "items": {
+            "$ref": "#/$defs/Person"
+          },
+          "title": "Creators",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "funding": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Funding",
+          "type": "array"
+        },
+        "geographic_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Geographic Location"
+        },
+        "identifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identifier"
+        },
+        "keywords": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Keywords",
+          "type": "array"
+        },
+        "license": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "License"
+        },
+        "methodology": {
+          "items": {
+            "$ref": "#/$defs/MethodologyNote"
+          },
+          "title": "Methodology",
+          "type": "array"
+        },
+        "related_datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Datasets",
+          "type": "array"
+        },
+        "related_publications": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Publications",
+          "type": "array"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Source"
+          },
+          "title": "Sources",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "title": "Project",
+      "type": "object"
+    },
+    "Relationship": {
+      "description": "A link between datasets (shared columns) or a documented external link.",
+      "properties": {
+        "confidence": {
+          "default": 1.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Datasets",
+          "type": "array"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "type": {
+          "enum": [
+            "shared_variables",
+            "documented_link"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "variables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Variables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "RepositoryInfo": {
+      "properties": {
+        "file_count": {
+          "title": "File Count",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "file_count"
+      ],
+      "title": "RepositoryInfo",
+      "type": "object"
+    },
+    "Severity": {
+      "description": "How badly a problem affects the result.",
+      "enum": [
+        "fatal",
+        "error",
+        "warning",
+        "info"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "Source": {
+      "description": "A pointer back to the origin of a single extracted value.",
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lines"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Method"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Summary": {
+      "properties": {
+        "datasets": {
+          "default": 0,
+          "title": "Datasets",
+          "type": "integer"
+        },
+        "errors": {
+          "default": 0,
+          "title": "Errors",
+          "type": "integer"
+        },
+        "matched": {
+          "default": 0,
+          "title": "Matched",
+          "type": "integer"
+        },
+        "undocumented": {
+          "default": 0,
+          "title": "Undocumented",
+          "type": "integer"
+        },
+        "variables": {
+          "default": 0,
+          "title": "Variables",
+          "type": "integer"
+        },
+        "warnings": {
+          "default": 0,
+          "title": "Warnings",
+          "type": "integer"
+        }
+      },
+      "title": "Summary",
+      "type": "object"
+    },
+    "UnmatchedVariable": {
+      "description": "A variable the README documents but which no column matched.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lines"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "UnmatchedVariable",
+      "type": "object"
+    },
+    "ValueLabel": {
+      "description": "A categorical code and its human-readable meaning, e.g. {\"code\": \"1\", \"label\": \"Male\"}.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "label"
+      ],
+      "title": "ValueLabel",
+      "type": "object"
+    },
+    "Variable": {
+      "description": "A single dataset column, enriched with documentation and provenance.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "format": {
+          "default": "default",
+          "title": "Format",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "match": {
+          "$ref": "#/$defs/VariableMatch"
+        },
+        "missing_values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Values",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "original_name": {
+          "title": "Original Name",
+          "type": "string"
+        },
+        "position": {
+          "title": "Position",
+          "type": "integer"
+        },
+        "role": {
+          "$ref": "#/$defs/ColumnRole",
+          "default": "text"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Source"
+          },
+          "title": "Sources",
+          "type": "object"
+        },
+        "statistics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColumnStatistics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "$ref": "#/$defs/ColumnType",
+          "default": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "value_labels": {
+          "items": {
+            "$ref": "#/$defs/ValueLabel"
+          },
+          "title": "Value Labels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "original_name",
+        "position",
+        "match"
+      ],
+      "title": "Variable",
+      "type": "object"
+    },
+    "VariableMatch": {
+      "description": "How a dataset column was linked to a documented variable (DESIGN.md section 14).",
+      "properties": {
+        "alternatives": {
+          "items": {
+            "$ref": "#/$defs/MatchAlternative"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "confidence": {
+          "default": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "documented_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Documented Name"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Method"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warning"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "VariableMatch",
+      "type": "object"
+    }
+  },
+  "$id": "https://gec2026/research_repository.schema.json",
+  "description": "The complete standardized output for one repository.",
+  "properties": {
+    "datasets": {
+      "items": {
+        "$ref": "#/$defs/Dataset"
+      },
+      "title": "Datasets",
+      "type": "array"
+    },
+    "documents": {
+      "items": {
+        "$ref": "#/$defs/DocumentInfo"
+      },
+      "title": "Documents",
+      "type": "array"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/FileRecord"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/Issue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "processing": {
+      "$ref": "#/$defs/Processing"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    },
+    "repository": {
+      "$ref": "#/$defs/RepositoryInfo"
+    },
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    }
+  },
+  "required": [
+    "schema_version",
+    "repository",
+    "project",
+    "processing"
+  ],
+  "title": "RepositoryDocument",
+  "type": "object"
+}

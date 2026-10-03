@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+out*.json
+events*.jsonl
+*.json
+!schemas/*.json

@@ -1,0 +1,45 @@
+[project]
+name = "research-normalizer"
+version = "1.0.0"
+description = "Transform a research data repository (CSV/TSV/TAB/Excel + README) into one standardized, validated JSON document."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "GEC 2026 Team" }]
+
+# Exact pins: these are the versions benchmarked and tested on 2026-10-03 (Apple M1, Python 3.13).
+# Every dependency is justified in docs/DESIGN.md section 7.
+dependencies = [
+    "polars==1.44.2",      # Rust columnar engine: CSV/TSV reading + vectorized type inference [1][2]
+    "fastexcel==0.21.0",   # calamine-based Excel reader, fastest engine, Arrow zero-copy [3][4]
+    "rapidfuzz==3.14.6",   # C++ fuzzy string matching for variable-name matching [5]
+    "pydantic==2.13.5",    # canonical models + validation + JSON Schema + fast JSON output [6]
+    "chardet==7.6.0",      # encoding detection, used only as one gated rung of the decode ladder [7]
+    "pypdf==6.19.0",       # text extraction from PDF READMEs/codebooks [9]
+    "python-docx==1.2.0",  # text + tables from Word READMEs/codebooks
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",       # test runner
+    "jsonschema==4.26.0",  # independent JSON Schema validator used in tests
+    "xlsxwriter==3.2.9",   # build .xlsx fixtures in tests (not used by the library itself)
+]
+
+[project.scripts]
+research-normalizer = "research_normalizer.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/research_normalizer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "slow: large-input tests (deselect with -m 'not slow')",
+]
+addopts = "-ra"
