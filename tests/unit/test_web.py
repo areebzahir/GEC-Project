@@ -84,6 +84,19 @@ def test_edit_rejects_bad_input():
         review.clean_edit(cow, ds, "nope", {"unit": "kg"}, {})
 
 
+def test_acknowledge_all_skips_matches():
+    items = [
+        {"id": "a", "kind": "low_confidence"}, {"id": "b", "kind": "ambiguous"},
+        {"id": "c", "kind": "undocumented_column"}, {"id": "d", "kind": "phantom_variable"},
+        {"id": "e", "kind": "phantom_variable"},
+    ]
+    decisions = {"e": {"decision": "acknowledge", "note": ""}}
+    assert review.acknowledge_all(items, decisions) == 2
+    assert set(decisions) == {"c", "d", "e"}            # matches a/b still need a person
+    assert decisions["e"]["note"] == ""                 # existing decisions are left alone
+    assert review.acknowledge_all(items, decisions) == 0
+
+
 def test_invalid_decision_rejected():
     with pytest.raises(ValueError):
         review.validate_decision({"kind": "phantom_variable"}, "accept")
@@ -133,8 +146,8 @@ def test_api_sample_review_export_flow(server):
         _call(server, f"/api/runs/{run['id']}/export")
     assert exc.value.code == 409
 
-    item = run["items"][0]["id"]
-    assert _call(server, f"/api/runs/{run['id']}/decisions", {"item_id": item, "decision": "acknowledge"})["status"] == "ready"
+    bulk = _call(server, f"/api/runs/{run['id']}/acknowledge-all", method="POST")
+    assert bulk["acknowledged"] == 1 and bulk["status"] == "ready"   # the phantom FRESH notice
     doc = _call(server, f"/api/runs/{run['id']}/export")
     jsonschema.validate(doc, SCHEMA)
     assert _call(server, f"/api/runs/{run['id']}")["status"] == "exported"

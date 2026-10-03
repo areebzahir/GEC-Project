@@ -10,6 +10,8 @@ Serves the static frontend and a small JSON API over :func:`run_pipeline`:
     GET  /api/runs/<id>                    full run: document, events, review items, decisions
     GET  /api/runs/<id>/events             Server-Sent Events stream of pipeline events
     POST /api/runs/<id>/decisions          {"item_id": ..., "decision": accept|reject|acknowledge|undo}
+    POST /api/runs/<id>/edits              {"dataset", "column", "fields": {...}} or {..., "revert": true}
+    POST /api/runs/<id>/acknowledge-all    acknowledge every pending notice (never accepts matches)
     GET  /api/runs/<id>/export[?log=1]     reviewed, re-validated JSON (or the decision log)
     GET  /api/runs/<id>/source?file=&start=&end=   read-only excerpt of an original file
     DELETE /api/runs/<id>                  forget a finished run (and its uploaded files)
@@ -46,7 +48,13 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
 
 
 class Run:
-    """One pipeline execution plus its review state. Mutated only under ``self.cond``."""
+    """One pipeline execution plus its review state. Mutated only under ``self.cond``.
+
+    Lifecycle: ``running`` (pipeline thread is emitting events) -> ``review`` (items still pending)
+    -> ``ready`` (every item decided) -> ``exported``; or ``failed`` if the pipeline raised. The
+    pipeline's document is never modified: decisions and edits are stored beside it and applied to
+    a copy for previews and exports, so any of them can be undone.
+    """
 
     def __init__(self, source: str, label: str, threshold: float, spec: dict) -> None:
         self.id = uuid.uuid4().hex[:8]
@@ -66,7 +74,7 @@ class Run:
         self.error: str | None = None
         self.cond = threading.Condition()
 
-    # EventSink protocol
+    # EventSink protocol: the pipeline thread calls this; waiting SSE handlers are woken up.
     def emit(self, event: PipelineEvent) -> None:
         with self.cond:
             self.events.append(json.loads(event.model_dump_json()))
@@ -115,6 +123,8 @@ class State:
                 for p in sorted(self.samples_dir.iterdir()) if p.is_dir()]
 
     def start_run(self, path: Path, source: str, label: str, threshold: float, spec: dict) -> Run:
+        # The pipeline runs on its own thread so the HTTP request returns at once; the browser then
+        # follows progress over /events (SSE) and fetches the finished run when "_end" arrives.
         run = Run(source, label, threshold, spec)
         run.input_path = path
         with self.lock:
@@ -234,6 +244,8 @@ def make_handler(state: State):
                     return self._decide(parts[2], body)
                 if len(parts) == 4 and parts[1] == "runs" and parts[3] == "edits":
                     return self._edit(parts[2], body)
+                if len(parts) == 4 and parts[1] == "runs" and parts[3] == "acknowledge-all":
+                    return self._acknowledge_all(parts[2])
             except (ValueError, KeyError) as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
             self._error(HTTPStatus.NOT_FOUND, "Unknown endpoint.")
@@ -316,6 +328,17 @@ def make_handler(state: State):
                 run.refresh_status()
                 return self._json(run.brief())
 
+        def _acknowledge_all(self, run_id: str):
+            run = self._run(run_id)
+            if run is None:
+                return
+            with run.cond:
+                count = review.acknowledge_all(run.items, run.decisions)
+                if count:
+                    run.exported = False
+                run.refresh_status()
+                return self._json({**run.brief(), "acknowledged": count})
+
         def _edit(self, run_id: str, body: dict):
             run = self._run(run_id)
             if run is None:
@@ -326,7 +349,7 @@ def make_handler(state: State):
                 dataset, column = str(body.get("dataset", "")), str(body.get("column", ""))
                 key = f"{dataset}::{column}"
                 if body.get("revert"):
-                    review._find(run.document, dataset, column)
+                    review.find_variable(run.document, dataset, column)  # 400 if the column is unknown
                     run.edits.pop(key, None)
                 else:
                     fields = body.get("fields")

@@ -261,7 +261,7 @@ No empty modules: anything not needed in the first implementation (an LLM resolv
 4. Strict cp1252 succeeds → cp1252. This is the most common legacy encoding for Canadian English/French data, and it is what `100A_README.txt` uses.
 5. latin-1, which never fails. Emit a WARNING with the byte offsets of suspicious characters.
 
-**Configuration** (`config.py`): a frozen dataclass `PipelineConfig`. Values come from defaults → optional `--config file.toml` (stdlib `tomllib`) → CLI flags. Examples: `missing_value_tokens`, `match_accept_threshold`, `match_review_threshold`, `ambiguity_margin`, `max_records_per_dataset`, `header_scan_rows`, `max_file_bytes`, `max_zip_members`, `workers`.
+**Configuration** (`config.py`): a frozen dataclass `PipelineConfig`. Values come from defaults → optional `--config file.toml` (stdlib `tomllib`) → CLI flags. Examples: `missing_value_tokens`, `match_accept_threshold`, `match_review_threshold`, `ambiguity_margin`, `max_records_per_dataset`, `header_scan_rows`, `max_file_bytes`, `max_zip_members`.
 
 ## 11. README parsing strategy
 
@@ -380,7 +380,7 @@ Order follows Frictionless Table Schema [14]: **missing values are applied to th
 - min / max for dates
 - top-10 values for categoricals
 
-For tables above `config.lazy_threshold_bytes`, the same expressions run on `scan_csv(...)` with streaming.
+Planned, not implemented in v1: for very large tables, run the same expressions on `scan_csv(...)` with streaming. Today every table is read eagerly, bounded by `max_file_bytes`.
 
 ## 14. Variable matching algorithm
 
@@ -563,14 +563,14 @@ The pipeline wraps each per-file stage in a boundary that converts unexpected li
 
 ## 19. Logging and event architecture
 
-`events.py` defines a `Stage` enum (`discovery`, `classification`, `readme_parsing`, `structure_detection`, `variable_extraction`, `variable_matching`, `normalization`, `validation`, `complete`), a `PipelineEvent` model (sequence, stage, status, plain `message`, `technical_message`, `progress` 0–100, `file`, `timestamp`, `data` dict), and an `EventSink` protocol. Sinks: `ConsoleSink` (CLI; technical detail with `-v`), `JsonLinesSink` (`--events events.jsonl`), `ListSink` (tests). Each event is a JSON object, so a later SSE endpoint [19] or WebSocket handler only forwards `event.model_dump_json()`, and a desktop GUI can subscribe to a callback. Issues are also emitted as `warning`/`failed` events as they occur. Developer logging uses the stdlib `logging` module; logs are for developers, events are the user-facing channel.
+`events.py` defines a `Stage` enum (`discovery`, `classification`, `readme_parsing`, `structure_detection`, `variable_matching`, `normalization`, `validation`, `complete`), a `PipelineEvent` model (sequence, stage, status, plain `message`, `technical_message`, `progress` 0–100, `file`, `timestamp`, `data` dict), and an `EventSink` protocol. Sinks: `ConsoleSink` (CLI; technical detail with `-v`), `JsonLinesSink` (`--events events.jsonl`), `ListSink` (tests). Each event is a JSON object, so a later SSE endpoint [19] or WebSocket handler only forwards `event.model_dump_json()`, and a desktop GUI can subscribe to a callback. Issues are also emitted as `warning`/`failed` events as they occur. Developer logging uses the stdlib `logging` module; logs are for developers, events are the user-facing channel.
 
 ## 20. Performance strategy
 
 - **Parse each file once.** One decoded sample serves sniffing and header detection. One Polars read. One profiling `select`. Polars and fastexcel hand over data through Arrow without copying [1][3].
 - **Read as strings, then cast with vectorized expressions** (55 ms per 3M cells measured). No Python per-cell loops.
-- **Large files:** above `lazy_threshold_bytes` (default 200 MB), profile with `scan_csv` streaming. Records are capped by config, so memory stays bounded.
-- **Parallelism:** `ThreadPoolExecutor(workers)` across files. Polars, fastexcel and RapidFuzz release the GIL in native code, so threads avoid process-spawn and pickling costs. Results are re-sorted for deterministic output. Within a file Polars is already multi-threaded, so a process pool would oversubscribe the 8-core M1. The worker count is benchmarked, not assumed (§22).
+- **Large files (planned, not in v1):** stream very large tables with `scan_csv`. Today records are capped by `max_records_per_dataset` and files by `max_file_bytes`, so memory stays bounded.
+- **Parallelism (planned, not in v1; files are currently read one after another):** `ThreadPoolExecutor(workers)` across files. Polars, fastexcel and RapidFuzz release the GIL in native code, so threads avoid process-spawn and pickling costs. Results are re-sorted for deterministic output. Within a file Polars is already multi-threaded, so a process pool would oversubscribe the 8-core M1. The worker count is benchmarked, not assumed (§22).
 - **Matching:** one `cdist` call per table, plus O(1) dictionary lookups for stages 1–3.
 - **Serialization:** Pydantic `model_dump_json()` (Rust) writes straight to file.
 
@@ -612,7 +612,7 @@ Plus: **golden tests on the two real samples** (`--deterministic`, byte-for-byte
 4. Thread worker count (1, 2, 4, 8) on a 200-file synthetic repository.
 5. End-to-end per stage on: the two samples, a 50-file mixed repository, and a 1M-row CSV.
 
-Results go in `benchmarks/RESULTS.md`, and only measured numbers appear in the README.
+Run `python benchmarks/bench_pipeline.py` and `python benchmarks/bench_matching.py` to reproduce the numbers; only measured numbers appear in the README.
 
 ## 23. Security considerations
 
@@ -679,7 +679,7 @@ Each step ends with passing tests. The pipeline is runnable end-to-end from step
 8. **Assembly + validation + serialization**, relationships, summary. Golden tests on both samples.
 9. **CLI:** `research-normalizer <input> -o out.json [--events events.jsonl] [--config cfg.toml] [--deterministic] [--all-records] [-v]`, with a human-readable terminal summary.
 10. **Mutation test suite + threshold tuning** on synthetic data only.
-11. **Benchmarks** and `benchmarks/RESULTS.md`.
+11. **Benchmarks** (`benchmarks/bench_pipeline.py`, `benchmarks/bench_matching.py`).
 12. **README.md** with usage, architecture summary, schema explanation, and the IEEE references from `docs/SOURCES.md`.
 
 The frontend (target: GUI for the rubric's 5 points) starts after step 9 and uses `run_pipeline(path, config, sink)` directly.

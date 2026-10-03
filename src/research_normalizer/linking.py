@@ -14,6 +14,10 @@ from rapidfuzz import fuzz
 
 from .readme.parser import ParsedReadme, VariableGroup
 
+# Fuzzy stems only catch small renames (a typo, a "_v2"). Exact and case-insensitive stems are tried
+# first, so similarly named files (survey_2018 / survey_2019, ratio ~91) can only be confused when the
+# file the README names is missing altogether. Below the threshold a group falls back to
+# repository-wide, which is the safer failure.
 _STEM_FUZZY_THRESHOLD = 90.0
 
 

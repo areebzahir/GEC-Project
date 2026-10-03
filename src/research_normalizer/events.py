@@ -26,7 +26,6 @@ class Stage(StrEnum):
     CLASSIFICATION = "classification"
     README_PARSING = "readme_parsing"
     STRUCTURE_DETECTION = "structure_detection"
-    VARIABLE_EXTRACTION = "variable_extraction"
     VARIABLE_MATCHING = "variable_matching"
     NORMALIZATION = "normalization"
     VALIDATION = "validation"
@@ -40,8 +39,7 @@ _STAGE_WEIGHTS: dict[Stage, int] = {
     Stage.CLASSIFICATION: 5,
     Stage.README_PARSING: 15,
     Stage.STRUCTURE_DETECTION: 30,
-    Stage.VARIABLE_EXTRACTION: 10,
-    Stage.VARIABLE_MATCHING: 20,
+    Stage.VARIABLE_MATCHING: 30,
     Stage.NORMALIZATION: 5,
     Stage.VALIDATION: 5,
     Stage.COMPLETE: 5,

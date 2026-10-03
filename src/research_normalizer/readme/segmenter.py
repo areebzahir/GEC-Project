@@ -75,6 +75,12 @@ def _strip_quote_noise(line: str) -> str:
 
 
 def _looks_like_heading(line: str, nxt: str | None, prev_is_rule: bool) -> bool:
+    """Plain-text heading heuristic for READMEs without Markdown ``#`` headings.
+
+    Three shapes count as a heading: an ALL-CAPS short line, a short line right after a rule line,
+    or a short line ending in ``:`` with nothing after it. A line with a value after its colon is
+    always a key/value instead. The word limits keep ordinary sentences from becoming headings.
+    """
     s = line.strip()
     if not s:
         return False

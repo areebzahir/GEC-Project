@@ -79,6 +79,25 @@ def review_items(doc: RepositoryDocument, threshold: float = DEFAULT_THRESHOLD) 
     return items
 
 
+BULK_NOTE = "acknowledged in bulk"
+
+
+def acknowledge_all(items: list[dict], decisions: dict[str, dict]) -> int:
+    """Acknowledge every pending notice-type item; never touches accept/reject (match) items.
+
+    Notices are items whose only allowed decision is ``acknowledge`` (undocumented columns, README
+    variables missing from the data). Matches still need a real accept or reject from a person.
+    Returns how many items were acknowledged.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    count = 0
+    for it in items:
+        if it["id"] not in decisions and ALLOWED[it["kind"]] == {"acknowledge"}:
+            decisions[it["id"]] = {"decision": "acknowledge", "note": BULK_NOTE, "decided_at": now}
+            count += 1
+    return count
+
+
 def validate_decision(item: dict, decision: str) -> None:
     if decision not in ALLOWED[item["kind"]]:
         allowed = ", ".join(sorted(ALLOWED[item["kind"]]))
@@ -86,7 +105,7 @@ def validate_decision(item: dict, decision: str) -> None:
 
 
 # --------------------------------------------------------------------------- variable edits
-def _find(doc: RepositoryDocument, dataset: str, column: str):
+def find_variable(doc: RepositoryDocument, dataset: str, column: str):
     ds = next((d for d in doc.datasets if d.id == dataset), None)
     if ds is None:
         raise ValueError(f"Unknown dataset: {dataset!r}")
@@ -112,7 +131,7 @@ def clean_edit(doc: RepositoryDocument, dataset: str, column: str, fields: dict,
     Returns the variable's full edit set as ``{field: {"value": new, "original": old}}``. A field set
     back to its original value is dropped, so "editing it back" is the same as reverting it.
     """
-    _, var = _find(doc, dataset, column)
+    _, var = find_variable(doc, dataset, column)
     unknown = set(fields) - EDITABLE
     if unknown:
         raise ValueError(f"Not editable: {', '.join(sorted(unknown))}. Editable: {', '.join(sorted(EDITABLE))}.")
@@ -140,7 +159,7 @@ def check_link_unique(doc: RepositoryDocument, edits: dict, dataset: str, column
     target = cleaned.get("documented_name", {}).get("value")
     if not target:
         return
-    ds, _ = _find(doc, dataset, column)
+    ds, _ = find_variable(doc, dataset, column)
     for v in ds.variables:
         if v.name == column:
             continue
@@ -172,7 +191,7 @@ def _apply_edits(doc: RepositoryDocument, edits: dict) -> None:
     """Apply reviewer edits in place (on a copy). Edited values get a 'reviewer' provenance entry."""
     reviewer = Source(file="reviewer", method="human_edit")
     for key, fields in edits.items():
-        ds, var = _find(doc, *key.split("::", 1))
+        ds, var = find_variable(doc, *key.split("::", 1))
         for field, change in fields.items():
             value = change["value"]
             if field == "documented_name":

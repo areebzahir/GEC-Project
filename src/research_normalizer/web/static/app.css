@@ -128,7 +128,6 @@ svg.lucide { width: 15px; height: 15px; flex: none; stroke-width: 1.75; }
 .panel { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-1); overflow: hidden; }
 .panel + .panel { margin-top: 16px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--line); }
-.panel-body { padding: 14px 16px; }
 .panel-empty { padding: 18px 16px; color: var(--fg-3); }
 .section { margin-top: 28px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -250,7 +249,6 @@ svg.lucide { width: 15px; height: 15px; flex: none; stroke-width: 1.75; }
 .rd-cands td { background: var(--bg-1); }
 .rd-actions { margin: 0; padding-left: 18px; color: var(--fg-2); }
 .rd-actions li + li { margin-top: 3px; } .rd-actions b { color: var(--fg); font-weight: 500; }
-.var-edit-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
 .var-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
 .var-edit-grid .span2 { grid-column: 1 / -1; }
 .textarea { height: auto; min-height: 56px; padding: 7px 10px; resize: vertical; line-height: 1.5; }

@@ -8,7 +8,7 @@ overridden from a TOML file (``--config``) or individual CLI flags; see ``cli.py
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # Tokens that mean "missing" in essentially every research dataset, applied to the raw strings
@@ -66,8 +66,6 @@ class PipelineConfig:
     # --- records / size limits (DESIGN.md sections 15, 23) ---
     max_records_per_dataset: int | None = 50_000
     """Rows emitted per dataset in the JSON; None means all (see --all-records)."""
-    lazy_threshold_bytes: int = 200 * 1024 * 1024
-    """Files larger than this are profiled with Polars streaming (scan_csv) instead of eager read."""
     max_file_bytes: int = 1024 * 1024 * 1024
     """Files above this are skipped with FILE_TOO_LARGE (1 GiB)."""
     max_files: int = 10_000
@@ -85,15 +83,10 @@ class PipelineConfig:
     # --- behaviour flags ---
     process_hidden_sheets: bool = True
     """Hidden/very-hidden Excel sheets are still processed, just flagged."""
-    workers: int = 0
-    """0 = auto (os.cpu_count). Threads across files; native libs release the GIL."""
     deterministic: bool = False
     """Drop timestamps/durations from output so golden tests compare byte-for-byte."""
 
     missing_value_tokens: tuple[str, ...] = DEFAULT_MISSING_VALUES
-
-    # free-form overrides collected from an unknown TOML key go nowhere; see from_toml guard
-    _extra: dict = field(default_factory=dict, repr=False, compare=False)
 
     def merged(self, **overrides: object) -> "PipelineConfig":
         """Return a copy with the given fields replaced (used by CLI flag handling)."""

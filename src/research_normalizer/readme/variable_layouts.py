@@ -130,7 +130,9 @@ def _delimited_layout(section: Section) -> list[VariableDefinition]:
             continue  # a prose sentence, not "name, description"
         rest = parts[1:]
         unit = None
-        # Peel a trailing unit-like segment off the end.
+        # Peel a trailing unit-like segment off the end ("BR, bacterial respiration, ugC/gSoil/hour").
+        # Only when something is left for the description, the segment contains a unit cue, and it
+        # is short: a long last segment is more likely the end of a sentence than a unit.
         if len(rest) >= 2 and _UNIT_CUE.search(rest[-1]) and len(rest[-1]) <= 25:
             unit = rest[-1].strip()
             rest = rest[:-1]

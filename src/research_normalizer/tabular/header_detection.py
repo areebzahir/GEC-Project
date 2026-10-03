@@ -103,6 +103,14 @@ def detect_header(
             norm = {re.sub(r"[\s_\-.]+", "", c.strip().lower()) for c in filled}
             overlap = len(norm & documented_names) / len(filled)
 
+        # Weighted evidence that row i is the header (Pytheas-style, DESIGN.md section 12):
+        #   fill     - a header spans the table's full width; title/note rows usually don't
+        #   textual  - header cells are words, not numbers or dates
+        #   unique   - header names don't repeat; repeated values look like data
+        #   contrast - the rows below are clearly more numeric than this one (header -> data switch)
+        #   overlap  - cells match README variable names; the strongest single clue when available
+        # The weights add up to more than 1 on purpose: overlap is a bonus, and only the ranking and
+        # the margin to the runner-up are used.
         score = (
             0.30 * fill
             + 0.25 * textual

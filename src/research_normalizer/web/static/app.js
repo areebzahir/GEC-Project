@@ -1,5 +1,20 @@
 'use strict';
-/* research-normalizer dashboard. Vanilla JS, no build step; every number comes from the local API. */
+/* research-normalizer dashboard. Vanilla JS, no build step; every number comes from the local API.
+ *
+ * How this file is organised (top to bottom):
+ *   state + constants  S holds everything; STAGES maps the 6 UI stages to backend event stages
+ *   data               api(), loadRuns/loadDetail, stream() = SSE progress for a running run
+ *   replay             new runs are replayed one stage at a time (STEP_MS) so they are readable
+ *   actions            startRun, decide, exportRun, delete
+ *   routing + chrome   hash routes #/dashboard, #/runs, #/inbox, #/run/<id>/<tab>; sidebar, crumbs
+ *   views              dashboard, runs, inbox, run page with tabs (overview, review, variables, ...)
+ *   narrate()          turns a finished document into one plain sentence + technical line per stage
+ *   review drawer      edit form beside the original README lines and raw data (/source endpoint)
+ *   modals, uploads, search, then one delegated click/keyboard handler for the whole page
+ *
+ * Rendering is plain template strings: render() rebuilds the main view; the drawer lives in its own
+ * root so an open form is never wiped by a background refresh. All dynamic text goes through esc().
+ */
 
 const TEAM = 'Team Amek';
 // The pipeline finishes in ~0.3 s. New runs are replayed one stage at a time at this pace so a
@@ -190,6 +205,26 @@ async function decide(runId, itemId, decision) {
   try {
     await api(`/api/runs/${runId}/decisions`, { method: 'POST', body: JSON.stringify({ item_id: itemId, decision }) });
     await loadDetail(runId);
+    render();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// Notices = items whose only option is "acknowledge" (undocumented columns, variables missing from
+// the data). Bulk-acknowledging them is safe; match items always need a real accept/reject.
+const pendingNotices = (d) => d.items.filter((it) => !d.decisions[it.id] && KIND[it.kind].actions.join() === 'acknowledge');
+
+function ackAllButton(d) {
+  const n = pendingNotices(d).length;
+  return n ? `<button class="btn btn-sm" data-action="ack-all" data-run="${d.id}"
+    title="Marks every warning/info notice as seen. Uncertain matches are left for you to accept or reject.">${icon('check-check')}Acknowledge ${plural(n, 'notice')}</button>` : '';
+}
+
+async function acknowledgeAll(runId) {
+  try {
+    const res = await api(`/api/runs/${runId}/acknowledge-all`, { method: 'POST' });
+    await loadDetail(runId);
+    const left = res.pending;
+    toast(`Acknowledged ${plural(res.acknowledged, 'notice')}.${left ? ` ${left} ${left === 1 ? 'match still needs' : 'matches still need'} your call.` : ''}`, 'ok');
     render();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -389,7 +424,8 @@ function viewInbox() {
       ${total ? status('review', total) : ''}</div>
     ${groups.length ? groups.map((r) => `
       <section class="section">
-        <div class="section-head"><a class="mono" href="#/run/${r.id}/review">${esc(r.repository)} <span class="faint">${esc(r.id)}</span></a><span class="faint">${plural(r.pending, 'item')}</span></div>
+        <div class="section-head"><a class="mono" href="#/run/${r.id}/review">${esc(r.repository)} <span class="faint">${esc(r.id)}</span></a>
+          <div class="toolbar-right">${ackAllButton(S.details[r.id])}<span class="faint">${plural(r.pending, 'item')}</span></div></div>
         ${reviewList(S.details[r.id], { onlyPending: true })}
       </section>`).join('')
     : `<div class="empty"><h2>All caught up</h2><p>No decisions are waiting.</p></div>`}
@@ -787,7 +823,8 @@ function reviewList(d, { onlyPending = false } = {}) {
          <button class="btn btn-sm btn-ghost" data-decide="undo" data-run="${d.id}" data-item="${esc(it.id)}">${icon('undo-2')}Undo</button>`
       : k.actions.map((a) => btn(a, it)).join('');
     const open = S.openItems.has(it.id);
-    const noteTag = dec?.note === AUTO_NOTE ? ' <span class="tag">via edit</span>' : '';
+    const noteTag = dec?.note === AUTO_NOTE ? ' <span class="tag">via edit</span>'
+      : dec?.note === 'acknowledged in bulk' ? ' <span class="tag">bulk</span>' : '';
     return `<div class="review-item ${!onlyPending && idx === S.focusIdx ? 'focus' : ''} ${dec ? 'is-decided' : ''}" data-review-idx="${idx}">
       <div class="min0">
         <div class="ri-head">
@@ -811,7 +848,8 @@ function tabReview(d) {
   if (!d.items.length) return `<div class="empty"><h2>Nothing to review</h2><p>Every column matched at ${fmtConf(d.threshold)} or above and every documented variable was found. Export is unlocked.</p></div>`;
   return `<div class="toolbar">
       <p class="hint"><span class="kbd">J</span><span class="kbd">K</span> move · <span class="kbd">O</span> details · <span class="kbd">A</span> accept · <span class="kbd">R</span> reject · <span class="kbd">U</span> undo · editing a variable also resolves its item</p>
-      ${d.pending ? status('review', d.pending) : '<span class="status ready"><span class="d"></span>All resolved</span>'}
+      <div class="toolbar-right">${ackAllButton(d)}
+        ${d.pending ? status('review', d.pending) : '<span class="status ready"><span class="d"></span>All resolved</span>'}</div>
     </div>
     ${reviewList(d)}
     <p class="hint" style="margin-top:12px">Rejecting a match turns that column into an undocumented one and records the README name as missing from the data. The export is re-checked against the schema.</p>`;
@@ -1406,6 +1444,7 @@ document.addEventListener('click', async (e) => {
     case 'delete-run': return run && confirmDelete([run.id]);
     case 'delete-selected': return confirmDelete([...S.selected]);
     case 'clear-selection': S.selected.clear(); return render();
+    case 'ack-all': return acknowledgeAll(t.dataset.run);
     case 'drawer-close': return closeDrawer();
     case 'drawer-prev': return stepDrawer(-1);
     case 'drawer-next': return stepDrawer(1);

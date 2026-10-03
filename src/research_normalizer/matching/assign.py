@@ -67,7 +67,10 @@ def match_variables(
         scores.append(row)
 
     # Greedy one-to-one assignment in descending score, deterministic tie-break
-    # (score, column position, definition position).
+    # (score, column position, definition position). Greedy rather than Hungarian on purpose
+    # (DESIGN.md section 14): every link can be explained as "this was the best pair still free",
+    # e.g. the exact BW_smooth pair is taken before BWsmooth_chg can claim BW_smooth (84.2 fuzzy).
+    # The rare dense conflicts where greedy is sub-optimal are the ones flagged as ambiguous below.
     candidate_cells = [
         (scores[ci][di][0], ci, di)
         for ci in range(len(columns))
@@ -102,7 +105,11 @@ def _apply_context(
     defn: VariableDefinition,
     columns: list[ColumnContext],
 ) -> float:
-    """Stage 5: nudge the base score with instance/structure evidence (Ref [12]), capped at 1.0."""
+    """Stage 5: nudge the base score with instance/structure evidence (Ref [12]), capped at 1.0.
+
+    The nudges are deliberately small (at most +0.08 / -0.05). Names stay the main signal; context
+    mostly decides between candidates whose names score about the same (e.g. C1 vs CA1 at 0.90).
+    """
     if base <= 0:
         return base
     score = base
