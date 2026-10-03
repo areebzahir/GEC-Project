@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>research-normalizer · Team Amek</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<div class="app">
+  <aside class="sidebar" aria-label="Primary">
+    <div class="sb-head">
+      <span class="monogram" aria-hidden="true">TA</span>
+      <div><div class="sb-team">Team Amek</div><div class="sb-sub">research-normalizer</div></div>
+    </div>
+    <div class="sb-body">
+      <nav aria-label="Views">
+        <a class="nav-item" data-nav="dashboard" href="#/dashboard"><i data-lucide="layout-grid"></i>Dashboard</a>
+        <a class="nav-item" data-nav="runs" href="#/runs"><i data-lucide="list"></i>Runs<span class="count" id="count-runs"></span></a>
+        <a class="nav-item" data-nav="inbox" href="#/inbox"><i data-lucide="inbox"></i>Review<span class="count" id="count-inbox"></span></a>
+      </nav>
+      <div class="sb-section">
+        <div class="sb-label">Repositories</div>
+        <div id="sb-repos"></div>
+      </div>
+    </div>
+    <div class="sb-foot">
+      <div class="sb-row"><span>Backend</span><span id="backend" class="status"><span class="d"></span>checking</span></div>
+      <div class="sb-row"><span>Review below</span><button class="link mono" data-action="settings" id="sb-threshold" title="Change review threshold"></button></div>
+      <div class="sb-row">
+        <span id="sb-version" class="mono"></span>
+        <span>
+          <button class="btn btn-ghost btn-icon btn-sm" data-action="shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><i data-lucide="keyboard"></i></button>
+          <button class="btn btn-ghost btn-icon btn-sm" data-action="settings" aria-label="Settings" title="Settings"><i data-lucide="settings"></i></button>
+        </span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+      <div class="search">
+        <i data-lucide="search"></i>
+        <input id="search" class="input" type="search" autocomplete="off" aria-label="Search runs, variables and README sections" placeholder="Search runs, variables, README…">
+        <span class="kbd">/</span>
+        <div id="search-results" class="search-results" role="listbox" hidden></div>
+      </div>
+      <button class="btn btn-primary" data-action="new-run"><i data-lucide="plus"></i>New run<span class="kbd">N</span></button>
+    </header>
+    <div id="view" class="view" tabindex="-1"></div>
+  </main>
+</div>
+<div id="drawer-root"></div>
+<div id="modal-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
