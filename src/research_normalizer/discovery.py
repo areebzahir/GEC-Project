@@ -24,6 +24,7 @@ from .config import (
     PipelineConfig,
 )
 from .issues import Issue, IssueCode, IssueCollector, Severity
+from .text_decoding import decode_bytes, looks_like_text
 
 # System/junk files that should never be treated as data or documentation.
 _IGNORED_NAMES: frozenset[str] = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
@@ -33,6 +34,17 @@ _IGNORED_DIR_PARTS: frozenset[str] = frozenset({"__MACOSX", ".git", ".svn", "__p
 _XLSX_MAGIC = b"PK\x03\x04"          # xlsx/xlsm/xlsb/ods are zip containers
 _XLS_MAGIC = b"\xd0\xcf\x11\xe0"      # legacy BIFF compound document
 _PDF_MAGIC = b"%PDF"
+
+# Documentation formats that are never data tables, so they skip the content sniff.
+_ALWAYS_DOCUMENT_EXTENSIONS: frozenset[str] = (DOCUMENT_EXTENSIONS - DELIMITED_EXTENSIONS) | {".markdown"}
+# Text extensions that promise a table (unlike .txt, which is as often prose).
+_DATA_TEXT_EXTENSIONS: frozenset[str] = DELIMITED_EXTENSIONS - {".txt"}
+# Text formats we recognise but do not parse (structured data, markup, code). Sniffing them as CSV
+# would turn e.g. a JSON or SQL file into a nonsense table, so they are listed as "other".
+_NON_TABULAR_TEXT_EXTENSIONS: frozenset[str] = frozenset({
+    ".json", ".geojson", ".jsonld", ".xml", ".html", ".htm", ".yaml", ".yml", ".toml", ".ipynb",
+    ".svg", ".py", ".r", ".rmd", ".js", ".m", ".sh", ".sql", ".tex", ".bib", ".css",
+})
 
 
 class FileRole(StrEnum):
@@ -96,34 +108,63 @@ def _readme_score(name: str) -> float:
     return 0.2
 
 
-def _classify(path: Path, head: bytes) -> FileRole:
-    """Decide a file's role from its extension, corrected by a content sniff."""
+def _classify(path: Path, head: bytes, config: PipelineConfig) -> FileRole:
+    """Decide a file's role: binary magic first, then a content sniff for anything text-like.
+
+    ``head`` is the first ``config.sample_bytes`` of the file. Extensions only route binary formats
+    and break ties; for text the content decides (DESIGN.md section 10 step 6).
+    """
     ext = path.suffix.lower()
 
-    # Content sniff first: a zip-container magic means a real spreadsheet regardless of extension.
-    if head.startswith(_XLSX_MAGIC) and ext in EXCEL_EXTENSIONS:
-        return FileRole.TABULAR
+    # Binary containers, recognised by magic bytes. A zip/OLE file is only a spreadsheet when the
+    # extension agrees; otherwise it is some other container (.zip, .doc, .msg) we do not read.
+    if head.startswith(_XLSX_MAGIC):
+        if ext in EXCEL_EXTENSIONS:
+            return FileRole.TABULAR
+        return FileRole.DOCUMENTATION if ext == ".docx" else FileRole.OTHER
     if head.startswith(_XLS_MAGIC):
-        return FileRole.TABULAR
+        return FileRole.TABULAR if ext in EXCEL_EXTENSIONS else FileRole.OTHER
     if head.startswith(_PDF_MAGIC):
         return FileRole.DOCUMENTATION
 
+    # Known formats without the expected magic keep their extension role; their readers report a
+    # corrupt file properly rather than us guessing here.
     if ext in EXCEL_EXTENSIONS:
         return FileRole.TABULAR
-    if ext == ".docx":
+    if ext in _ALWAYS_DOCUMENT_EXTENSIONS:
         return FileRole.DOCUMENTATION
-    # A .txt could be either prose or a delimited table; the dialect sniffer decides later
-    # (DESIGN.md section 10 step 6). We tentatively route obvious documentation names to docs and
-    # everything else delimited-ish to tabular.
-    if ext in DELIMITED_EXTENSIONS:
-        if ext in {".txt"} and _readme_score(path.name) >= 0.5:
-            return FileRole.DOCUMENTATION
-        if ext in {".csv", ".tsv", ".tab", ".dat"}:
+    if ext in _NON_TABULAR_TEXT_EXTENSIONS or not looks_like_text(head):
+        return FileRole.OTHER
+
+    return _classify_text(path, ext, head, config)
+
+
+def _classify_text(path: Path, ext: str, head: bytes, config: PipelineConfig) -> FileRole:
+    """Table or prose? Decided by the content; the README-ness of the name only breaks ties."""
+    # Local import: tabular/__init__ imports base, which imports this module (import cycle).
+    from .tabular.classify import tabular_evidence
+
+    known_text = ext in DELIMITED_EXTENSIONS or ext == ""
+    if not head.strip():
+        # Empty file: nothing to sniff. Keep the extension's promise so the reader reports it.
+        if ext in _DATA_TEXT_EXTENSIONS:
             return FileRole.TABULAR
-        return FileRole.DOCUMENTATION  # a plain .txt with no table-ish signal
-    if ext in DOCUMENT_EXTENSIONS:
-        return FileRole.DOCUMENTATION
-    return FileRole.OTHER
+        return FileRole.DOCUMENTATION if known_text else FileRole.OTHER
+    evidence = tabular_evidence(decode_bytes(_cut_at_line(head), config).text)
+    if evidence >= 1.0:
+        return FileRole.TABULAR
+    if evidence > 0.0:  # consistent columns but only a couple of rows: let the name decide
+        if _readme_score(path.name) >= 0.5:
+            return FileRole.DOCUMENTATION
+        return FileRole.TABULAR if known_text else FileRole.OTHER
+    # Prose. Unknown extensions (.log, .R, ...) are not READMEs; keep them out of the parser.
+    return FileRole.DOCUMENTATION if known_text else FileRole.OTHER
+
+
+def _cut_at_line(head: bytes) -> bytes:
+    """Drop a trailing partial line so a sample never ends mid-row or mid-character."""
+    nl = head.rfind(b"\n")
+    return head[: nl + 1] if nl > 0 else head
 
 
 def _read_head(path: Path, n: int = 8) -> bytes:
@@ -292,7 +333,7 @@ def _walk_and_classify(
                 ))
                 continue
 
-            role = _classify(path, _read_head(path))
+            role = _classify(path, _read_head(path, config.sample_bytes), config)
             found.append(DiscoveredFile(
                 path=path,
                 relative_path=rel,

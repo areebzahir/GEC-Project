@@ -18,6 +18,8 @@ from research_normalizer.web.server import State, _safe_relpath, make_handler
 
 from ..conftest import REPO_ROOT, SAMPLES
 
+# Above every inferred (non-exact) match confidence, so case/abbreviation links become review items.
+STRICT = 0.99
 SCHEMA = json.loads((REPO_ROOT / "schemas" / "research_repository.schema.json").read_text(encoding="utf-8"))
 
 
@@ -26,16 +28,20 @@ def test_review_items_flag_phantom_and_low_confidence():
     kinds = {(i["kind"], i["documented_name"]) for i in review.review_items(pig, 0.95)}
     assert kinds == {("phantom_variable", "FRESH")}
 
+    # The clean abbreviation BWsmth_chg -> BWsmooth_chg is a mutual-best pair, so it no longer needs
+    # review at 0.95; only a stricter threshold surfaces the inferred (non-exact) links.
     cow = run_pipeline(SAMPLES / "dairy_cattle_energy")
-    items = review.review_items(cow, 0.95)
-    assert [(i["kind"], i["column"]) for i in items] == [("low_confidence", "BWsmth_chg")]
-    assert review.review_items(cow, 0.90) == []
+    assert review.review_items(cow, 0.95) == []
+    items = review.review_items(cow, STRICT)
+    assert {(i["kind"], i["column"]) for i in items} == {
+        ("low_confidence", "date"), ("low_confidence", "BWsmth_chg"), ("low_confidence", "HP_Greenfeed")}
 
 
 def test_reject_moves_name_to_unmatched_and_stays_schema_valid():
     cow = run_pipeline(SAMPLES / "dairy_cattle_energy")
-    items = review.review_items(cow, 0.95)
-    out = review.apply_decisions(cow, items, {items[0]["id"]: {"decision": "reject"}})
+    items = review.review_items(cow, STRICT)
+    item = next(i for i in items if i["column"] == "BWsmth_chg")
+    out = review.apply_decisions(cow, items, {item["id"]: {"decision": "reject"}})
     ds = out.datasets[0]
     var = next(v for v in ds.variables if v.name == "BWsmth_chg")
     assert var.match.status.value == "unmatched" and var.description is None
@@ -155,7 +161,11 @@ def test_api_sample_review_export_flow(server):
 
 
 def test_api_edit_flows_into_export(server):
-    run = _wait(server, _call(server, "/api/runs", {"sample": "dairy_cattle_energy", "threshold": 0.95})["id"])
+    run = _wait(server, _call(server, "/api/runs", {"sample": "dairy_cattle_energy", "threshold": STRICT})["id"])
+    assert run["pending"] == 3  # date, BWsmth_chg, HP_Greenfeed: the inferred links
+    for item in run["items"]:  # accept the two case-only links so BWsmth_chg is the only open item
+        if item["column"] != "BWsmth_chg":
+            _call(server, f"/api/runs/{run['id']}/decisions", {"item_id": item["id"], "decision": "accept"})
     ds = run["document"]["datasets"][0]["id"]
     brief = _call(server, f"/api/runs/{run['id']}/edits",
                   {"dataset": ds, "column": "BWsmth_chg", "fields": {"unit": "kg/day", "label": "BW change"}})

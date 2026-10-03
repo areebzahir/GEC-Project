@@ -429,6 +429,18 @@
           "title": "Lines",
           "type": "array"
         },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
         "title": {
           "anyOf": [
             {
@@ -589,6 +601,9 @@
         "MATCH_LOW_CONFIDENCE",
         "VARIABLE_UNDOCUMENTED",
         "DOCUMENTED_VARIABLE_NOT_IN_DATA",
+        "DOCUMENTED_VARIABLE_INTENTIONALLY_ABSENT",
+        "DOCUMENTED_VARIABLE_IN_OTHER_FILE",
+        "DOCUMENTATION_UNASSIGNED",
         "SCHEMA_VALIDATION_FAILED",
         "INTERNAL_ERROR"
       ],
@@ -1007,7 +1022,7 @@
       "type": "object"
     },
     "Relationship": {
-      "description": "A link between datasets (shared columns) or a documented external link.",
+      "description": "A link between datasets or a documented external link.\n\n* ``shared_variables``: same-named columns with compatible types and overlapping values.\n* ``documented_join``: the README states that files are related (its text is in ``evidence``).\n* ``cross_file_reference``: a README section documents a variable that lives in another file.\n* ``documented_link``: an external URL the README points to.",
       "properties": {
         "confidence": {
           "default": 1.0,
@@ -1021,6 +1036,13 @@
           "title": "Datasets",
           "type": "array"
         },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
         "from": {
           "anyOf": [
             {
@@ -1032,6 +1054,17 @@
           ],
           "default": null,
           "title": "From"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "target": {
           "anyOf": [
@@ -1048,7 +1081,9 @@
         "type": {
           "enum": [
             "shared_variables",
-            "documented_link"
+            "documented_link",
+            "documented_join",
+            "cross_file_reference"
           ],
           "title": "Type",
           "type": "string"
@@ -1218,6 +1253,18 @@
           ],
           "default": null,
           "title": "Description"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
         },
         "lines": {
           "anyOf": [

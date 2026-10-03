@@ -43,6 +43,7 @@ class Section:
     line_start: int
     line_end: int
     blocks: list[Block] = field(default_factory=list)
+    level: int | None = None    # Markdown heading depth (# = 1); None for plain-text headings
 
 
 # A key/value line: optional leading list number, then "Key: value". Key is <=60 chars and must not
@@ -53,6 +54,19 @@ _LIST_RE = re.compile(r"^\s*(?:[-*•·]|\d+[.)])\s+(?P<item>.+)$")
 _RULE_RE = re.compile(r"^\s*(?:[-=_*]{3,}|-)\s*$")  # a lone '-' is used as a rule in the dairy README
 _PIPE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 _PROMPT_RE = re.compile(r"<[^>]{3,}>")  # template prompts like <provide at least two contacts>
+# Column gap in a whitespace-aligned table (PDF text, fixed-width codebooks): a tab or 2+ spaces.
+_COLUMN_GAP_RE = re.compile(r"\t+|\s{2,}")
+
+
+def looks_like_aligned_row(line: str) -> bool:
+    """True when a line splits into 2+ columns on tabs / runs of spaces (an aligned table row).
+
+    A leading list number ("1.  Introduction") does not count as a column.
+    """
+    cells = [c for c in _COLUMN_GAP_RE.split(line.strip()) if c]
+    if cells and re.fullmatch(r"\d+[.)]?", cells[0]):
+        cells = cells[1:]
+    return len(cells) >= 2
 
 
 def _strip_quote_noise(line: str) -> str:
@@ -84,6 +98,9 @@ def _looks_like_heading(line: str, nxt: str | None, prev_is_rule: bool) -> bool:
     s = line.strip()
     if not s:
         return False
+    # An aligned table header such as "VARIABLE    DESCRIPTION    UNITS" is a table row, not a title.
+    if looks_like_aligned_row(s):
+        return False
     kv = _KEY_VALUE_RE.match(s)
     if kv:
         # A line with a value after the colon is a key/value, never a heading.
@@ -111,6 +128,10 @@ def _looks_like_heading(line: str, nxt: str | None, prev_is_rule: bool) -> bool:
 def _markdown_heading(line: str) -> str | None:
     m = re.match(r"^\s*(#{1,6})\s+(?P<t>.+?)\s*#*\s*$", line)
     return m.group("t").strip() if m else None
+
+
+def _markdown_level(line: str) -> int:
+    return len(line.strip()) - len(line.strip().lstrip("#"))
 
 
 def segment(lines: list[str]) -> list[Section]:
@@ -145,7 +166,8 @@ def segment(lines: list[str]) -> list[Section]:
         is_setext = bool(nxt and re.match(r"^\s*(={3,}|-{3,})\s*$", nxt)) and len(stripped) <= 80
         if md is not None or is_setext:
             title = md if md is not None else stripped
-            sections.append(Section(title=title, line_start=lineno, line_end=lineno))
+            level = _markdown_level(raw) if md is not None else (1 if nxt and nxt.startswith("=") else 2)
+            sections.append(Section(title=title, line_start=lineno, line_end=lineno, level=level))
             prev_is_rule = False
             i += 2 if is_setext else 1
             continue
@@ -182,6 +204,9 @@ def segment(lines: list[str]) -> list[Section]:
                 ):
                     break
                 if _looks_like_heading(lines[j], None, False) or _RULE_RE.match(follow):
+                    break
+                # The next row of an aligned table is its own line, not a wrapped value.
+                if looks_like_aligned_row(follow):
                     break
                 value = f"{value} {_strip_quote_noise(lines[j])}".strip()
                 end = j + 1
@@ -232,6 +257,9 @@ def _is_real_key(key: str, value: str) -> bool:
     if "//" in key or key.lower().split()[-1] in {"http", "https", "ftp", "doi", "ftps"}:
         return False
     if value.strip().startswith("//"):
+        return False
+    # A column gap inside the "key" means this is an aligned table row that happens to hold a colon.
+    if _COLUMN_GAP_RE.search(key):
         return False
     # A key with many words that reads like a sentence is probably prose, unless it is a known long
     # template label (handled by project_fields via fuzzy matching, which tolerates these).

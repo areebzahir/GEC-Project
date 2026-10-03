@@ -19,8 +19,9 @@ from ..issues import Issue, IssueCode, Severity
 from ..schema.document import DatasetStructure
 from ..text_decoding import decode_bytes
 from .base import RawTable
+from .classify import looks_like_data_dictionary
 from .dialect import sniff_dialect
-from .header_detection import clean_headers, detect_header
+from .header_detection import clean_headers, collect_header_units, detect_header, is_units_row
 
 _FORMAT_BY_EXT = {".csv": "csv", ".tsv": "tsv", ".tab": "tab", ".txt": "text", ".dat": "dat"}
 
@@ -59,9 +60,19 @@ def read_delimited(file: DiscoveredFile, config: PipelineConfig) -> list[RawTabl
     header_row_in_grid = choice.row_index if choice.row_index is not None else 0
     absolute_header_row = dialect.skip_rows + header_row_in_grid  # 0-based within the file
 
+    # A units row ("(kg)", "mg/L", ...) right under the header is metadata, not the first record.
+    units_row = None
+    if choice.row_index is not None and absolute_header_row + 1 < len(full_grid):
+        candidate = full_grid[absolute_header_row + 1]
+        if is_units_row(candidate):
+            units_row = candidate
+
     # Read the body with has_header=False so Polars does not silently de-duplicate column names;
     # we take the real header values from the grid and do our own cleaning (DESIGN.md section 12).
-    frame, read_issues = _read_frame(text, file, dialect, absolute_header_row, choice.row_index is None, config)
+    frame, read_issues = _read_frame(
+        text, file, dialect, absolute_header_row, choice.row_index is None, config,
+        rows_after_header=1 if units_row is not None else 0,
+    )
     issues.extend(read_issues)
 
     width = frame.width
@@ -108,6 +119,8 @@ def read_delimited(file: DiscoveredFile, config: PipelineConfig) -> list[RawTabl
         header_row=None if choice.row_index is None else absolute_header_row + 1,
         header_confidence=choice.confidence,
     )
+    # A codebook CSV ("variable,description,unit") documents other files; flag it for the pipeline.
+    kind = "dictionary" if looks_like_data_dictionary(cleaned, _sample_rows(frame)) else "data"
     return [RawTable(
         source_name=file.path.stem,
         worksheet_name=None,
@@ -117,7 +130,21 @@ def read_delimited(file: DiscoveredFile, config: PipelineConfig) -> list[RawTabl
         structure=structure,
         declared_format=_FORMAT_BY_EXT.get(file.extension, "delimited"),
         issues=issues,
+        kind=kind,
+        header_units=collect_header_units(cleaned, original_headers, units_row),
     )]
+
+
+# Body rows handed to the dictionary detector; enough to judge, cheap on big files.
+_DICTIONARY_SAMPLE_ROWS = 50
+
+
+def _sample_rows(frame: pl.DataFrame) -> list[list[str]]:
+    """First body rows as plain strings (None -> "")."""
+    return [
+        ["" if v is None else str(v) for v in row]
+        for row in frame.head(_DICTIONARY_SAMPLE_ROWS).iter_rows()
+    ]
 
 
 def _sample(text: str, limit: int) -> str:
@@ -148,13 +175,17 @@ def _read_frame(
     header_row_0based: int,
     synthesise_header: bool,
     config: PipelineConfig,
+    rows_after_header: int = 0,
 ) -> tuple[pl.DataFrame, list[Issue]]:
-    """Read the full file into an all-string DataFrame, stepping down the fallback ladder on error."""
+    """Read the full file into an all-string DataFrame, stepping down the fallback ladder on error.
+
+    ``rows_after_header`` extra rows (e.g. a units row) are skipped between the header and the body.
+    """
     issues: list[Issue] = []
     data = text.encode("utf-8")  # Polars reads UTF-8 bytes; we already decoded correctly
     # Always read with has_header=False and skip through the header row ourselves, so Polars never
     # renames duplicate headers behind our back; the body therefore starts just after the header.
-    body_start = dialect.skip_rows if synthesise_header else header_row_0based + 1
+    body_start = dialect.skip_rows if synthesise_header else header_row_0based + 1 + rows_after_header
     common = dict(
         separator=dialect.delimiter,
         has_header=False,
@@ -181,7 +212,7 @@ def _read_frame(
             return frame, issues
         except Exception as exc_b:  # noqa: BLE001
             # Rung C: stdlib csv row-by-row, padding/truncating ragged rows to the header width.
-            frame = _stdlib_read(text, dialect, header_row_0based, synthesise_header)
+            frame = _stdlib_read(text, dialect, header_row_0based, synthesise_header, rows_after_header)
             issues.append(Issue.make(
                 IssueCode.CSV_PARSE_FAILED, Severity.WARNING,
                 f"{file.relative_path} could not be parsed by the fast reader; used a tolerant fallback.",
@@ -198,7 +229,7 @@ def _fit_width(values: list[str], width: int) -> list[str]:
     return values[:width]
 
 
-def _stdlib_read(text, dialect, header_row_0based, synthesise_header) -> pl.DataFrame:
+def _stdlib_read(text, dialect, header_row_0based, synthesise_header, rows_after_header=0) -> pl.DataFrame:
     """Tolerant last-resort reader: pads/truncates every row to the header width."""
     kwargs: dict = {"delimiter": dialect.delimiter}
     if dialect.quote_char is None:
@@ -214,7 +245,7 @@ def _stdlib_read(text, dialect, header_row_0based, synthesise_header) -> pl.Data
         body = rows
     else:
         width = len(rows[0])
-        body = rows[1:]
+        body = rows[1 + rows_after_header :]
     # Positional column names only (the caller overwrites them with the cleaned header), so
     # duplicate names in the file can never collide and drop a column here.
     norm = [(r + [""] * width)[:width] for r in body]

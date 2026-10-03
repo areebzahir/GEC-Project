@@ -15,15 +15,16 @@ from ..discovery import DiscoveredFile
 from ..issues import Issue, IssueCode, Severity
 from ..schema.document import DatasetStructure
 from .base import RawTable
-from .header_detection import clean_headers, detect_header
+from .classify import looks_like_data_dictionary, looks_like_notes_sheet, notes_lines
+from .header_detection import clean_headers, collect_header_units, detect_header, is_units_row
 
 
 def read_excel(file: DiscoveredFile, config: PipelineConfig) -> list[RawTable]:
-    """Read every data sheet of a workbook. Returns one RawTable per non-empty sheet.
+    """Read every sheet of a workbook (.xlsx/.xlsm/.xlsb/.xls/.ods, all via calamine).
 
-    A workbook that cannot be opened yields a single empty-handed result is avoided: instead we
-    return an empty list and the caller records EXCEL_CORRUPT (handled in the pipeline). Here we
-    attach the issue to the first readable sheet, or raise it via a sentinel empty table.
+    Returns one RawTable per sheet: ``kind="data"`` for data tables, ``"dictionary"`` for codebook
+    sheets and ``"notes"`` for free-text sheets. Empty, skipped or unreadable sheets and corrupt
+    workbooks come back as empty-frame sentinel tables that only carry their issues.
     """
     import fastexcel  # local import: keep package import light
 
@@ -63,7 +64,13 @@ def _read_sheet(reader, sheet_name: str, file: DiscoveredFile, config: PipelineC
     visible = getattr(sheet, "visible", "visible")
     if visible != "visible":
         if not config.process_hidden_sheets:
-            return None
+            # Still report the skip (nothing silently ignored); the sentinel carries the issue.
+            issues.append(Issue.make(
+                IssueCode.EXCEL_HIDDEN_SHEET, Severity.INFO,
+                f"Sheet {sheet_name!r} in {file.relative_path} is {visible}; skipped by configuration.",
+                file=file.relative_path, sheet=sheet_name,
+            ))
+            return _sheet_with_issues(file, sheet_name, issues)
         issues.append(Issue.make(
             IssueCode.EXCEL_HIDDEN_SHEET, Severity.INFO,
             f"Sheet {sheet_name!r} in {file.relative_path} is {visible}; processed it anyway.",
@@ -84,6 +91,15 @@ def _read_sheet(reader, sheet_name: str, file: DiscoveredFile, config: PipelineC
 
     choice = detect_header(grid, config)
     header_idx = choice.row_index if choice.row_index is not None else 0
+    units_row = None
+
+    # A codebook sheet is still a table (name/description columns), so check it before deciding
+    # the sheet is free-text notes. Notes sheets have no meaningful header at all.
+    is_dictionary = choice.row_index is not None and looks_like_data_dictionary(
+        clean_headers(grid[header_idx])[0], grid[header_idx + 1 : header_idx + 1 + _DICTIONARY_SAMPLE_ROWS],
+    )
+    if not is_dictionary and looks_like_notes_sheet(grid):
+        return _notes_table(file, sheet_name, grid, issues)
 
     if choice.row_index is None:
         width = len(grid[0]) if grid else 0
@@ -97,6 +113,9 @@ def _read_sheet(reader, sheet_name: str, file: DiscoveredFile, config: PipelineC
     else:
         original_headers = [c for c in grid[header_idx]]
         body = grid[header_idx + 1 :]
+        # A units row ("(kg)", "mg/L", ...) right under the header is metadata, not the first record.
+        if body and is_units_row(body[0]):
+            units_row, body = body[0], body[1:]
         if choice.ambiguous:
             issues.append(Issue.make(
                 IssueCode.HEADER_AMBIGUOUS, Severity.WARNING,
@@ -130,6 +149,30 @@ def _read_sheet(reader, sheet_name: str, file: DiscoveredFile, config: PipelineC
         structure=structure,
         declared_format="excel",
         issues=issues,
+        kind="dictionary" if is_dictionary else "data",
+        header_units=collect_header_units(cleaned, original_headers, units_row),
+    )
+
+
+# Body rows handed to the dictionary detector; enough to judge, cheap on big sheets.
+_DICTIONARY_SAMPLE_ROWS = 50
+# Column name of the single text column a notes sheet is flattened into.
+NOTES_COLUMN = "text"
+
+
+def _notes_table(file: DiscoveredFile, sheet_name: str, grid: list[list[str]], issues: list[Issue]) -> RawTable:
+    """A free-text sheet as one string column, one line per sheet row, for the README parser."""
+    lines = notes_lines(grid)
+    return RawTable(
+        source_name=f"{file.path.stem} - {sheet_name}",
+        worksheet_name=sheet_name,
+        headers=[NOTES_COLUMN],
+        original_headers=[NOTES_COLUMN],
+        frame=pl.DataFrame({NOTES_COLUMN: lines}, schema={NOTES_COLUMN: pl.String}),
+        structure=DatasetStructure(encoding="binary-excel", header_row=None, header_confidence=0.0),
+        declared_format="excel",
+        issues=issues,
+        kind="notes",
     )
 
 

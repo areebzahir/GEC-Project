@@ -16,7 +16,25 @@ from ..config import PipelineConfig
 
 _NUMERIC_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
 _DATE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}$")
-_UNIT_RE = re.compile(r"^[\(\[].+[\)\]]$|^[a-zA-Z%°/]+(\s*/\s*[a-zA-Z0-9]+)*$")
+# A whole cell wrapped in brackets: "(kg)", "[mg/L]".
+_BRACKETED_RE = re.compile(r"^[\(\[](?P<inner>[^\(\)\[\]]{1,20})[\)\]]$")
+# A trailing bracketed part of a header name: "Temperature (°C)", "Mass [kg]".
+_HEADER_UNIT_RE = re.compile(r"[\(\[](?P<inner>[^\(\)\[\]]{1,20})[\)\]]\s*$")
+# Characters that only appear in unit notation (ratio, percent, degree, micro, powers).
+_UNIT_SYMBOL_RE = re.compile(r"[/%°µμ^²³‰]")
+# Bare unit words recognised without symbols. Multi-letter only: single letters ("m", "g", "s")
+# are too often category codes (sex, grade) to be trusted on their own.
+_BARE_UNITS = frozenset({
+    "kg", "mg", "ug", "ng", "mm", "cm", "km", "ml", "ul", "mol", "mmol", "umol", "ppm", "ppb",
+    "pa", "kpa", "hpa", "mpa", "kj", "mj", "kcal", "cal", "kw", "mw", "ha", "degc", "degf",
+    "sec", "secs", "seconds", "minutes", "hr", "hrs", "hours", "days", "weeks", "months",
+    "yr", "yrs", "year", "years", "percent", "lb", "lbs", "oz", "ft", "inch", "inches",
+})
+_MAX_UNIT_CHARS = 20
+# Share of a row's informative cells that must look like units for it to be a units row.
+_UNITS_ROW_MIN_SHARE = 0.6
+# Placeholders meaning "no unit" in a units row; neither unit evidence nor counter-evidence.
+_NO_UNIT_PLACEHOLDERS = frozenset({"", "-", "\u2014", "na", "n/a", "none", "unitless", "()"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,8 +46,84 @@ class HeaderChoice:
     ambiguous: bool
 
 
-def _looks_numeric(cell: str) -> bool:
+def looks_numeric(cell: str) -> bool:
+    """True for a plain number such as ``12``, ``-3.5`` or ``9.16E+06``."""
     return bool(_NUMERIC_RE.match(cell.strip()))
+
+
+
+def _unit_like_token(text: str) -> bool:
+    """True if ``text`` (without brackets) reads like unit notation: "mg/L", "°C", "%", "kg"."""
+    t = text.strip()
+    if not t or len(t) > _MAX_UNIT_CHARS or looks_numeric(t) or len(t.split()) > 3:
+        return False
+    # Units are mostly letters/symbols; digit-heavy text with "/" is a date or ratio value.
+    if sum(ch.isdigit() for ch in t) > sum(ch.isalpha() for ch in t):
+        return False
+    return bool(_UNIT_SYMBOL_RE.search(t)) or t.lower() in _BARE_UNITS
+
+
+def looks_like_unit(cell: str) -> bool:
+    """True for a units-row cell: a short bracketed token like "(kg)" or unit notation like "mg/L"."""
+    t = cell.strip()
+    bracketed = _BRACKETED_RE.match(t)
+    if bracketed:
+        # Any short bracketed token that is not number-like is a unit in a units row: "(n)", "(score)".
+        inner = bracketed.group("inner")
+        return sum(ch.isdigit() for ch in inner) <= sum(ch.isalpha() for ch in inner)
+    return _unit_like_token(t)
+
+
+def is_units_row(row: list[str]) -> bool:
+    """True if a row (usually the one right under the header) holds units rather than data.
+
+    Placeholders such as "-" or blank (columns without a unit) are ignored; any plain number means
+    it is data. Most of the remaining cells must look like units.
+    """
+    informative = [c.strip() for c in row if c.strip().lower() not in _NO_UNIT_PLACEHOLDERS]
+    if not informative or any(looks_numeric(c) for c in informative):
+        return False
+    units = sum(1 for c in informative if looks_like_unit(c))
+    return units / len(informative) >= _UNITS_ROW_MIN_SHARE
+
+
+def unit_from_units_cell(cell: str) -> str | None:
+    """The unit text of a units-row cell, brackets removed ("(kg)" -> "kg"); None for placeholders."""
+    t = cell.strip()
+    if t.lower() in _NO_UNIT_PLACEHOLDERS:
+        return None
+    bracketed = _BRACKETED_RE.match(t)
+    return bracketed.group("inner").strip() if bracketed else t
+
+
+def collect_header_units(
+    columns: list[str],
+    original_headers: list[str],
+    units_row: list[str] | None,
+) -> dict[str, str]:
+    """Build ``{column: unit}`` from a units row (preferred) or units embedded in header names."""
+    units: dict[str, str] = {}
+    for i, column in enumerate(columns):
+        unit = None
+        if units_row is not None and i < len(units_row):
+            unit = unit_from_units_cell(units_row[i])
+        if unit is None and i < len(original_headers):
+            unit = unit_from_header(original_headers[i])
+        if unit:
+            units[column] = unit
+    return units
+
+
+def unit_from_header(name: str) -> str | None:
+    """Unit embedded in a header name: "Temperature (°C)" -> "°C". None if the bracket is not a unit.
+
+    The name itself is never changed; this only feeds ``RawTable.header_units``.
+    """
+    m = _HEADER_UNIT_RE.search(name.strip())
+    if not m or m.start() == 0:
+        return None  # no bracket, or the whole name is bracketed (that is a units cell, not a name)
+    inner = m.group("inner").strip()
+    return inner if _unit_like_token(inner) else None
 
 
 def _looks_date(cell: str) -> bool:
@@ -41,7 +135,7 @@ def _row_textuality(row: list[str]) -> float:
     filled = [c for c in row if c.strip()]
     if not filled:
         return 0.0
-    textual = sum(1 for c in filled if not _looks_numeric(c) and not _looks_date(c))
+    textual = sum(1 for c in filled if not looks_numeric(c) and not _looks_date(c))
     return textual / len(filled)
 
 
@@ -95,7 +189,7 @@ def detect_header(
         # Type contrast: how much more numeric are the rows *below* this one?
         below = grid[i + 1 : i + 6]
         below_numeric = _numeric_fraction(below)
-        this_numeric = sum(1 for c in filled if _looks_numeric(c)) / len(filled)
+        this_numeric = sum(1 for c in filled if looks_numeric(c)) / len(filled)
         contrast = max(0.0, below_numeric - this_numeric)
 
         overlap = 0.0
@@ -121,7 +215,7 @@ def detect_header(
         # Penalise rows that are basically a single cell (titles) or look like a units row.
         if len(filled) == 1:
             score -= 0.4
-        if all(_UNIT_RE.match(c.strip()) for c in filled) and i > 0:
+        if i > 0 and is_units_row(row):
             score -= 0.2
 
         scored.append((score, i))
@@ -147,7 +241,7 @@ def _numeric_fraction(rows: list[list[str]]) -> float:
     cells = [c for row in rows for c in row if c.strip()]
     if not cells:
         return 0.0
-    return sum(1 for c in cells if _looks_numeric(c) or _looks_date(c)) / len(cells)
+    return sum(1 for c in cells if looks_numeric(c) or _looks_date(c)) / len(cells)
 
 
 def clean_headers(raw: list[str]) -> tuple[list[str], list[tuple[str, str]]]:

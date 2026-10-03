@@ -14,7 +14,22 @@ from pathlib import Path
 # Tokens that mean "missing" in essentially every research dataset, applied to the raw strings
 # before any type casting (Frictionless Table Schema order, Ref [14]). README-declared codes are
 # added to this set per file; we never guess numeric sentinels like -99 unless the README says so.
-DEFAULT_MISSING_VALUES: tuple[str, ...] = ("", "NA", "N/A", "n/a", "NaN", "null", "NULL", "None", ".")
+#
+# Deliberately NOT included: "?" (used as a literal value/uncertainty marker), "0" (a real value),
+# and "na"/"Na" (sodium in chemistry columns).
+_COMMON_MISSING_TOKENS: tuple[str, ...] = (
+    "", "NA", "N/A", "n/a", "N.A.", "n.a.", "NaN", "nan", "NAN",
+    "null", "NULL", "None", "missing", "Missing", ".", "-", "\u2014",  # \u2014 = em dash
+)
+# Error values Excel writes into cells (and into CSVs exported from Excel); never real data.
+EXCEL_ERROR_TOKENS: tuple[str, ...] = (
+    "#N/A", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#NULL!",
+)
+DEFAULT_MISSING_VALUES: tuple[str, ...] = _COMMON_MISSING_TOKENS + EXCEL_ERROR_TOKENS
+
+# Numeric codes that researchers often use for "missing" without declaring them. They are only ever
+# *warned about* (POSSIBLE_UNDECLARED_MISSING_CODE), never nulled, unless the README declares them.
+POSSIBLE_MISSING_SENTINELS: tuple[float, ...] = (-9, -99, -999, -9999, 999, 9999)
 
 # Delimiters and quote characters the dialect sniffer will try (Ref [10][11][25]). Anything outside
 # these must be supplied explicitly; that is a deliberate, documented limit, not a silent failure.
@@ -56,6 +71,10 @@ class PipelineConfig:
     """A column with at most this many distinct values is tagged 'categorical'."""
     type_sample_examples: int = 5
     """How many failing example values to attach when a type is rejected."""
+    sentinel_outlier_iqr_factor: float = 10.0
+    """A sentinel like -999 is suspicious only if it is this many IQRs away from the median."""
+    sentinel_min_other_values: int = 4
+    """Need at least this many non-sentinel values before judging whether a sentinel is an outlier."""
 
     # --- encoding (DESIGN.md section 10) ---
     encoding_min_confidence: float = 0.80

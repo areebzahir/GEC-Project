@@ -35,6 +35,8 @@ class RawTable:
     structure: DatasetStructure
     declared_format: str                    # csv | tsv | tab | excel | ...
     issues: list[Issue] = field(default_factory=list)
+    kind: str = "data"                      # "data" | "dictionary" (a codebook table) | "notes" (free text)
+    header_units: dict[str, str] = field(default_factory=dict)  # column -> unit from a units row
 
 
 # A table reader turns one discovered file into one-or-more RawTables (Excel yields one per sheet).

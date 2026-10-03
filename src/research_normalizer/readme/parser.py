@@ -17,12 +17,17 @@ from ..config import PipelineConfig
 from ..issues import Issue
 from .abbreviations import extract_abbreviations
 from .loaders import load_document
+from .absence import is_exclusion_title
+from .missing_codes import codes_from_key_value, codes_from_text
 from .project_fields import ProjectFields, extract_project_fields
-from .segmenter import Section, segment
+from .relationships import find_relationships
+from .scope import ScopeHint, hint_from_heading, hint_from_lead_line
+from .segmenter import Block, BlockType, Section, segment
 from .variable_layouts import (
     VariableDefinition,
     find_declared_counts,
-    find_missing_codes,
+    line_coverage,
+    mark_absent,
     recognise_variables,
 )
 
@@ -42,6 +47,19 @@ class VariableGroup:
     missing_codes: list[str] = field(default_factory=list)
     section_title: str | None = None
     readme_file: str | None = None        # the documentation file these definitions came from
+    sheet_hint: str | None = None         # worksheet the README names for these variables, if any
+    section_lines: tuple[int, int] | None = None  # line span of the section the group came from
+
+
+@dataclass(slots=True)
+class DocumentedRelationship:
+    """A relationship the README states explicitly, e.g. "a.csv and b.csv join on site_id"."""
+
+    files: list[str]                      # filenames as written in the README
+    variables: list[str]                  # key/linking variable names, if stated
+    text: str                             # the README sentence, kept verbatim for provenance
+    line_start: int = 0
+    line_end: int = 0
 
 
 @dataclass(slots=True)
@@ -57,6 +75,9 @@ class ParsedReadme:
     abbreviations: dict[str, str]
     referenced_files: list[str]           # all filenames the README mentions
     issues: list[Issue] = field(default_factory=list)
+    relationships: list[DocumentedRelationship] = field(default_factory=list)
+    global_missing_codes: list[str] = field(default_factory=list)  # repository-wide missing codes
+    source_kind: str = "readme"           # "readme" | "dictionary" (a data-dictionary table/sheet)
 
 
 def parse_readme(
@@ -67,27 +88,49 @@ def parse_readme(
 ) -> ParsedReadme:
     """Parse a documentation file end to end."""
     doc = load_document(path, extension, config)
-    sections = segment(doc.lines)
-    full_text = "\n".join(doc.lines)
+    parsed = parse_lines(doc.lines, path.name, documented_columns,
+                         doc_format=doc.doc_format, encoding=doc.encoding)
+    parsed.issues.extend(doc.issues)
+    return parsed
 
-    project = extract_project_fields(sections, path.name, full_text)
+
+def parse_lines(
+    lines: list[str],
+    file_name: str,
+    documented_columns: frozenset[str] = frozenset(),
+    *,
+    doc_format: str = "text",
+    encoding: str = "n/a",
+) -> ParsedReadme:
+    """Parse already-loaded documentation lines (a README file, or a notes sheet in a workbook)."""
+    sections = segment(lines)
+    full_text = "\n".join(lines)
+
+    project = extract_project_fields(sections, file_name, full_text)
     abbreviations = extract_abbreviations(full_text)
     referenced = _unique(_FILENAME_RE.findall(full_text))
 
-    groups = _extract_variable_groups(sections, documented_columns)
+    groups, global_missing = _extract_variable_groups(sections, documented_columns)
     for group in groups:
-        group.readme_file = path.name
+        group.readme_file = file_name
+
+    relationships = [
+        DocumentedRelationship(files=s.files, variables=s.variables, text=s.text,
+                               line_start=s.line_start, line_end=s.line_end)
+        for s in find_relationships(sections)
+    ]
 
     return ParsedReadme(
-        file_name=path.name,
-        doc_format=doc.doc_format,
-        encoding=doc.encoding,
+        file_name=file_name,
+        doc_format=doc_format,
+        encoding=encoding,
         sections=sections,
         project=project,
         variable_groups=groups,
         abbreviations=abbreviations,
         referenced_files=referenced,
-        issues=list(doc.issues),
+        relationships=relationships,
+        global_missing_codes=global_missing,
     )
 
 
@@ -105,7 +148,7 @@ _FILE_CONTEXT_KEYS = ("data-specific information for", "data specific informatio
 def _extract_variable_groups(
     sections: list[Section],
     documented_columns: frozenset[str],
-) -> list[VariableGroup]:
+) -> tuple[list[VariableGroup], list[str]]:
     """Find variable definitions, binding them to the data file named in the surrounding context.
 
     We walk the sections in order while tracking a running "data context" (the filename, declared
@@ -114,6 +157,7 @@ def _extract_variable_groups(
     (DESIGN.md section 11).
     """
     groups: list[VariableGroup] = []
+    global_missing: list[str] = []
     ctx_file: str | None = None
     ctx_vars: int | None = None
     ctx_rows: int | None = None
@@ -135,9 +179,11 @@ def _extract_variable_groups(
             ctx_vars = var_count
         if row_count is not None:
             ctx_rows = row_count
-        missing = find_missing_codes(section)
+        missing = _missing_in_section(section)
         if missing:
             ctx_missing = missing
+            if file_for_this_section is None and not _is_variable_section(section, documented_columns):
+                global_missing = missing
 
         if not _is_variable_section(section, documented_columns):
             continue
@@ -145,6 +191,7 @@ def _extract_variable_groups(
         variables = [v for v in variables if _looks_like_variable(v.name)]
         if not variables:
             continue
+        mark_absent(variables, section)
 
         groups.append(VariableGroup(
             file_hint=file_for_this_section,
@@ -153,8 +200,23 @@ def _extract_variable_groups(
             declared_row_count=ctx_rows,
             missing_codes=list(ctx_missing),
             section_title=section.title,
+            section_lines=(section.line_start, section.line_end),
         ))
-    return groups
+    return groups, global_missing
+
+
+def _missing_in_section(section: Section) -> list[str]:
+    """Missing-value codes stated in a section, from key/values or prose sentences."""
+    for block in section.blocks:
+        if block.type is BlockType.KEY_VALUE and block.key:
+            codes = codes_from_key_value(block.key, block.value or "")
+            if codes is not None:
+                return codes
+        elif block.type is BlockType.TEXT:
+            codes = codes_from_text(block.text)
+            if codes:
+                return codes
+    return []
 
 
 def _is_variable_section(section: Section, documented_columns: frozenset[str]) -> bool:

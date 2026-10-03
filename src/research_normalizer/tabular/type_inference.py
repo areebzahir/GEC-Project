@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from ..config import PipelineConfig
+from ..config import POSSIBLE_MISSING_SENTINELS, PipelineConfig
 from ..issues import Issue, IssueCode, Severity
 from ..schema.document import ColumnRole, ColumnType
 
@@ -79,7 +79,10 @@ def infer_column_type(
     missing = set(config.missing_value_tokens) | extra_missing
     values = _non_missing(series, missing)
     issues: list[Issue] = []
-    present_missing = sorted({t for t in missing if t})  # tokens actually configured
+    # Report only the codes that actually occur in this column, so the output is honest about the
+    # data rather than echoing the whole configured list. Blank cells are always missing and are
+    # not listed as a "code".
+    present_missing = _observed_missing_tokens(series, missing)
 
     if values.is_empty():
         return ColumnTypeResult(ColumnType.STRING, "default", ColumnRole.TEXT, present_missing, [], issues)
@@ -98,9 +101,11 @@ def infer_column_type(
         # Integer first (more specific than number).
         if _all_cast(values, pl.Int64):
             role = ColumnRole.IDENTIFIER if distinct == values.len() else ColumnRole.MEASURE
+            issues.extend(_sentinel_warnings(values, column, file, missing, config))
             return ColumnTypeResult(ColumnType.INTEGER, "default", role, present_missing, [], issues)
         # Number (covers scientific notation like 9.16E+06).
         if _all_cast(values, pl.Float64):
+            issues.extend(_sentinel_warnings(values, column, file, missing, config))
             return ColumnTypeResult(ColumnType.NUMBER, "default", ColumnRole.MEASURE, present_missing, [], issues)
 
     # Date / datetime, only for an unambiguous format.
@@ -124,6 +129,73 @@ def infer_column_type(
     failures = _blocking_examples(values, config.type_sample_examples)
     role = _text_role(distinct, values.len(), config)
     return ColumnTypeResult(ColumnType.STRING, "default", role, present_missing, failures, issues)
+
+
+def _observed_missing_tokens(series: pl.Series, missing: set[str]) -> list[str]:
+    """The non-blank missing tokens that occur in ``series``, sorted for deterministic output."""
+    tokens = [t for t in missing if t]
+    if not tokens:
+        return []
+    stripped = series.str.strip_chars()
+    found = stripped.filter(stripped.is_in(tokens)).unique().to_list()
+    return sorted(str(t) for t in found)
+
+
+def _sentinel_warnings(
+    values: pl.Series,
+    column: str,
+    file: str,
+    missing: set[str],
+    config: PipelineConfig,
+) -> list[Issue]:
+    """Warn when a typical missing-data code (-999, 9999, ...) sits far outside a numeric column.
+
+    Such a value is very likely an undeclared missing code, but it could also be real, so we only
+    warn (POSSIBLE_UNDECLARED_MISSING_CODE) and never null it. "Far" means more than
+    ``sentinel_outlier_iqr_factor`` interquartile ranges from the median of the other values.
+    """
+    numbers = values.cast(pl.Float64, strict=False).drop_nulls()
+    declared = {_as_float(t) for t in missing} - {None}
+    issues: list[Issue] = []
+    for sentinel in POSSIBLE_MISSING_SENTINELS:
+        if sentinel in declared:
+            continue  # the README already says this code means missing; it was nulled
+        count = int((numbers == sentinel).sum())
+        if count == 0:
+            continue
+        others = numbers.filter(~numbers.is_in(list(POSSIBLE_MISSING_SENTINELS)))
+        if others.len() < config.sentinel_min_other_values:
+            continue  # too few real values to tell an outlier from the normal range
+        median = float(others.median())
+        iqr = float(others.quantile(0.75, "linear") - others.quantile(0.25, "linear"))
+        # A constant column has IQR 0; use a tiny floor so any far-off sentinel still stands out.
+        spread = max(iqr, 1e-9)
+        if abs(sentinel - median) <= config.sentinel_outlier_iqr_factor * spread:
+            continue
+        code = _format_sentinel(sentinel)
+        issues.append(Issue.make(
+            IssueCode.POSSIBLE_UNDECLARED_MISSING_CODE, Severity.WARNING,
+            f"Column {column!r} contains {code} ({count} time(s)), far outside its other values; "
+            "it may be an undeclared missing-data code.",
+            technical_detail=(
+                f"median={median:g}, IQR={iqr:g}, |{code} - median| > "
+                f"{config.sentinel_outlier_iqr_factor:g} x IQR; values kept as-is"
+            ),
+            file=file, column=column,
+            suggestion=f"If {code} means 'missing', declare it in the README's missing-data codes.",
+        ))
+    return issues
+
+
+def _as_float(token: str) -> float | None:
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _format_sentinel(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 def _date_fits(values: pl.Series, fmt: str) -> bool:

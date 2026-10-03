@@ -12,13 +12,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import SCHEMA_VERSION, TOOL_VERSION
-from .assemble import build_dataset, build_project, detect_relationships
+from .assemble import (
+    build_dataset,
+    build_project,
+    detect_relationships,
+    documented_joins,
+    slugify,
+    unassigned_documentation_issues,
+)
 from .config import PipelineConfig
 from .discovery import DiscoveredFile, DiscoveryResult, FileRole, discover
 from .events import EventEmitter, EventSink, ListSink, Stage
 from .issues import Issue, IssueCode, IssueCollector, Severity
-from .linking import link_groups_to_datasets
-from .readme.parser import ParsedReadme, parse_readme
+from .linking import DatasetKey, DatasetTarget, RepositoryScope, scope_groups
+from .readme.dictionary import parse_dictionary
+from .readme.parser import ParsedReadme, parse_lines, parse_readme
 from .schema.document import (
     Dataset,
     DocumentInfo,
@@ -26,11 +34,15 @@ from .schema.document import (
     FileRecord,
     Processing,
     Project,
+    Relationship,
     RepositoryDocument,
     RepositoryInfo,
     Summary,
 )
 from .tabular.base import RawTable, read_table
+
+# RawTable kinds that hold documentation rather than data (routed to the README parsers).
+_DOC_TABLE_KINDS = frozenset({"dictionary", "notes"})
 
 
 def run_pipeline(
@@ -83,18 +95,6 @@ def _run_with_files(
             IssueCode.UNSUPPORTED_FILE, Severity.INFO,
             f"Skipped unsupported file: {f.relative_path}.", file=f.relative_path,
         ))
-    if not doc_files:
-        issues.add(Issue.make(
-            IssueCode.README_NOT_FOUND, Severity.WARNING,
-            "No README or documentation file was found; variables cannot be described.",
-            suggestion="Add a README describing the datasets and their variables.",
-        ))
-    elif len(doc_files) > 1:
-        issues.add(Issue.make(
-            IssueCode.README_MULTIPLE, Severity.INFO,
-            f"Found {len(doc_files)} documentation files; each is linked to the data it names.",
-        ))
-
     # --- read data structures first (so READMEs can be matched against real columns) ------------
     emitter.emit(Stage.STRUCTURE_DETECTION, "started", "Reading data files and detecting their structure")
     tables: list[tuple[DiscoveredFile, RawTable]] = []
@@ -108,9 +108,13 @@ def _run_with_files(
                 issues.extend(table.issues)
                 tables.append((file, table))
 
-    all_columns = frozenset(h for _, t in tables for h in t.headers)
+    # Tables that are really documentation (a codebook, a notes sheet) are parsed as such below.
+    data_tables = [(f, t) for f, t in tables if t.kind not in _DOC_TABLE_KINDS]
+    doc_tables = [(f, t) for f, t in tables if t.kind in _DOC_TABLE_KINDS]
+    _readme_count_issues(doc_files, doc_tables, issues)
+    all_columns = frozenset(h for _, t in data_tables for h in t.headers)
 
-    # --- parse READMEs -----------------------------------------------------
+    # --- parse READMEs (files, then documentation tables) -----------------
     emitter.emit(Stage.README_PARSING, "started", "Reading documentation")
     parsed_readmes: list[ParsedReadme] = []
     with _timed(stage_ms, Stage.README_PARSING):
@@ -122,46 +126,61 @@ def _run_with_files(
             if parsed is not None:
                 issues.extend(parsed.issues)
                 parsed_readmes.append(parsed)
+        for file, table in doc_tables:
+            parsed = _first(_safe(
+                lambda f=file, t=table: [_parse_doc_table(f, t, all_columns)],
+                file, issues, Stage.README_PARSING,
+            ))
+            if parsed is not None:
+                issues.extend(parsed.issues)
+                parsed_readmes.append(parsed)
     emitter.emit(Stage.README_PARSING, "completed", f"Parsed {len(parsed_readmes)} documentation file(s)")
 
-    # --- link README variable groups to the data files they describe -------
-    data_rel_paths = [f.relative_path for f in data_files]
-    per_file_groups, global_groups = link_groups_to_datasets(parsed_readmes, data_rel_paths)
+    # --- scope README variable groups to the datasets they describe ------
+    failed_files: set[str] = set()
+    targets: list[DatasetTarget] = []
+    dataset_ids: dict[DatasetKey, str] = {}
+    for file, table in data_tables:
+        if table.frame.width == 0:
+            # Sentinel table (empty/corrupt sheet): its issues were already collected.
+            failed_files.add(file.relative_path)
+            continue
+        targets.append(DatasetTarget(file.relative_path, table.worksheet_name, tuple(table.headers)))
+        dataset_ids[(file.relative_path, table.worksheet_name)] = slugify(table.source_name)
+    scope = RepositoryScope(scope_groups(parsed_readmes, targets), targets, dataset_ids, parsed_readmes)
     aliases = {k: v for r in parsed_readmes for k, v in r.abbreviations.items()}
 
     # --- build datasets (variable extraction + matching + normalization) ---
     emitter.emit(Stage.VARIABLE_MATCHING, "started", "Matching documented variables to data columns")
     datasets: list[Dataset] = []
-    failed_files: set[str] = set()
+    relationships: list[Relationship] = []
     with _timed(stage_ms, Stage.VARIABLE_MATCHING):
-        for file, table in tables:
+        for file, table in data_tables:
             if table.frame.width == 0:
-                # Sentinel table (empty/corrupt sheet): its issues were already collected.
-                failed_files.add(file.relative_path)
                 continue
-            groups = list(per_file_groups.get(file.relative_path, [])) + list(global_groups)
             built = _first(_safe(
-                lambda t=table, f=file, g=groups: [build_dataset(t, f.relative_path, g, aliases, config)],
+                lambda t=table, f=file: [build_dataset(t, f.relative_path, scope, aliases, config)],
                 file, issues, Stage.VARIABLE_MATCHING,
             ))
             if built is not None:
-                dataset, ds_issues = built
-                issues.extend(ds_issues)
-                datasets.append(dataset)
+                issues.extend(built.issues)
+                datasets.append(built.dataset)
+                relationships.extend(built.relationships)
+        issues.extend(unassigned_documentation_issues(scope))
     datasets.sort(key=lambda d: d.file)
 
     # Stamp each dataset's last_updated from the generation date of a README that describes it.
-    _apply_last_updated(datasets, parsed_readmes, per_file_groups)
+    _apply_last_updated(datasets, scope)
 
     # --- relationships -----------------------------------------------------
     emitter.emit(Stage.NORMALIZATION, "started", "Looking for relationships between datasets")
     with _timed(stage_ms, Stage.NORMALIZATION):
-        relationships = detect_relationships(datasets)
+        relationships = detect_relationships(datasets) + documented_joins(parsed_readmes, datasets) + relationships
         relationships.extend(_documented_links(parsed_readmes))
         project, project_issues = build_project(parsed_readmes)
         issues.extend(project_issues)
 
-    documents = _document_infos(parsed_readmes, doc_files, per_file_groups)
+    documents = _document_infos(parsed_readmes, doc_files, scope)
 
     # --- assemble + validate ----------------------------------------------
     emitter.emit(Stage.VALIDATION, "started", "Assembling and validating the result")
@@ -233,9 +252,36 @@ def _first(items):
     return items[0] if items else None
 
 
-def _documented_links(parsed_readmes: list[ParsedReadme]):
-    from .schema.document import Relationship
+def _readme_count_issues(doc_files, doc_tables, issues: IssueCollector) -> None:
+    """Warn when there is no documentation at all; note when there are several sources."""
+    sources = len(doc_files) + len(doc_tables)
+    if not sources:
+        issues.add(Issue.make(
+            IssueCode.README_NOT_FOUND, Severity.WARNING,
+            "No README or documentation file was found; variables cannot be described.",
+            suggestion="Add a README describing the datasets and their variables.",
+        ))
+    elif sources > 1:
+        issues.add(Issue.make(
+            IssueCode.README_MULTIPLE, Severity.INFO,
+            f"Found {sources} documentation sources; each is linked to the data it describes.",
+        ))
 
+
+def _parse_doc_table(file: DiscoveredFile, table: RawTable, documented_columns: frozenset[str]) -> ParsedReadme:
+    """Parse a documentation table: a data dictionary (one variable per row) or a notes sheet."""
+    body = [["" if cell is None else str(cell) for cell in row] for row in table.frame.rows()]
+    if table.kind == "dictionary":
+        return parse_dictionary([list(table.headers), *body], file.relative_path, table.worksheet_name)
+    # Notes: one line per row, cells tab-separated so "Key:<tab>value" still reads as key/value.
+    rows = ([list(table.headers)] if table.structure.header_row is not None else []) + body
+    lines = ["\t".join(c.strip() for c in row if c and c.strip()) for row in rows]
+    return parse_lines(lines, file.relative_path, documented_columns,
+                       doc_format="sheet" if table.worksheet_name else "text",
+                       encoding=table.structure.encoding)
+
+
+def _documented_links(parsed_readmes: list[ParsedReadme]) -> list[Relationship]:
     links = []
     seen: set[str] = set()
     for readme in parsed_readmes:
@@ -246,28 +292,18 @@ def _documented_links(parsed_readmes: list[ParsedReadme]):
     return links
 
 
-def _apply_last_updated(datasets, parsed_readmes, per_file_groups) -> None:
+def _apply_last_updated(datasets: list[Dataset], scope: RepositoryScope) -> None:
     """Set each dataset's last_updated to the generation date of a README that describes it."""
-    gen_by_readme = {r.file_name: r.project.values.get("readme_generated_on") for r in parsed_readmes}
     for dataset in datasets:
-        for group in per_file_groups.get(dataset.file, []):
-            gen = gen_by_readme.get(group.readme_file)
+        for binding in scope.scoping.bound_to((dataset.file, dataset.worksheet_name)):
+            gen = binding.readme.project.values.get("readme_generated_on")
             if gen:
                 dataset.last_updated = gen
                 break
 
 
-def _document_infos(parsed_readmes, doc_files, per_file_groups) -> list[DocumentInfo]:
+def _document_infos(parsed_readmes, doc_files, scope: RepositoryScope) -> list[DocumentInfo]:
     by_name = {f.relative_path.split("/")[-1]: f for f in doc_files}
-    # Which datasets each readme describes, from the file hints on its groups.
-    describes_by_readme: dict[str, list[str]] = {}
-    for path, groups in per_file_groups.items():
-        for group in groups:
-            if group.readme_file:
-                describes_by_readme.setdefault(group.readme_file, [])
-                if path not in describes_by_readme[group.readme_file]:
-                    describes_by_readme[group.readme_file].append(path)
-
     infos: list[DocumentInfo] = []
     for readme in parsed_readmes:
         disc = by_name.get(readme.file_name)
@@ -275,8 +311,10 @@ def _document_infos(parsed_readmes, doc_files, per_file_groups) -> list[Document
             file=disc.relative_path if disc else readme.file_name,
             format=readme.doc_format,
             encoding=readme.encoding,
-            describes=describes_by_readme.get(readme.file_name, []),
-            sections=[DocumentSection(title=s.title, lines=(s.line_start, s.line_end))
+            # From the final scoping, so it lists exactly the datasets this document was bound to.
+            describes=[f"{path}#{sheet}" if sheet else path for path, sheet in scope.scoping.describes(readme)],
+            sections=[DocumentSection(title=s.title, lines=(s.line_start, s.line_end),
+                                      text="\n".join(b.text for b in s.blocks) or None)
                       for s in readme.sections if s.title],
         ))
     return infos

@@ -114,6 +114,8 @@ class Project(BaseModel):
 class DocumentSection(BaseModel):
     title: str | None = None
     lines: tuple[int, int]
+    text: str | None = None
+    """The section's text as parsed (its blocks joined by newlines), so nothing is lost."""
 
 
 class DocumentInfo(BaseModel):
@@ -123,6 +125,7 @@ class DocumentInfo(BaseModel):
     format: str
     encoding: str
     describes: list[str] = Field(default_factory=list)
+    """Dataset files this document was bound to; a worksheet is written as ``file#sheet``."""
     sections: list[DocumentSection] = Field(default_factory=list)
 
 
@@ -201,6 +204,8 @@ class UnmatchedVariable(BaseModel):
     name: str
     description: str | None = None
     lines: tuple[int, int] | None = None
+    file: str | None = None
+    """The documentation file that describes the variable."""
 
 
 class Dataset(BaseModel):
@@ -229,14 +234,23 @@ class Dataset(BaseModel):
 
 # --------------------------------------------------------------------------- relationships & files
 class Relationship(BaseModel):
-    """A link between datasets (shared columns) or a documented external link."""
+    """A link between datasets or a documented external link.
 
-    type: Literal["shared_variables", "documented_link"]
+    * ``shared_variables``: same-named columns with compatible types and overlapping values.
+    * ``documented_join``: the README states that files are related (its text is in ``evidence``).
+    * ``cross_file_reference``: a README section documents a variable that lives in another file.
+    * ``documented_link``: an external URL the README points to.
+    """
+
+    type: Literal["shared_variables", "documented_link", "documented_join", "cross_file_reference"]
     datasets: list[str] = Field(default_factory=list)
     variables: list[str] = Field(default_factory=list)
     from_: str | None = Field(default=None, alias="from")
     target: str | None = None
     confidence: float = 1.0
+    source: Source | None = None
+    """Where the relationship was stated, for documented ones."""
+    evidence: list[str] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 

@@ -37,6 +37,28 @@ class DecodeResult:
     replaced_chars: int  # count of U+FFFD replacements (only possible on the latin-1 rung... it has none)
 
 
+# Control bytes other than tab/newline/carriage-return/form-feed hardly ever occur in text files;
+# above this share of a sample we call the file binary.
+_MAX_CONTROL_BYTE_SHARE = 0.05
+_TEXT_CONTROL_BYTES = frozenset(b"\t\n\r\f\b")
+
+
+def looks_like_text(sample: bytes) -> bool:
+    """Cheap binary/text test on the first bytes of a file.
+
+    A BOM means text (UTF-16/32 legitimately contain NUL bytes). Otherwise a NUL byte or many
+    control characters means binary, the same rule ``file``/git use.
+    """
+    if not sample:
+        return True
+    if any(sample.startswith(bom) for bom, _ in _BOMS):
+        return True
+    if b"\x00" in sample:
+        return False
+    control = sum(1 for b in sample if b < 32 and b not in _TEXT_CONTROL_BYTES)
+    return control / len(sample) <= _MAX_CONTROL_BYTE_SHARE
+
+
 def _strict_decode(data: bytes, encoding: str) -> str | None:
     """Try a strict decode; return None if it fails, so the ladder can fall through."""
     try:
