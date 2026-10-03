@@ -101,9 +101,24 @@ def tabular_evidence(text: str) -> float:
         return 0.0
     if _is_prose_split_by_delimiter(modal_rows):
         return 0.0
+    if _has_document_preamble(lines[: dialect.skip_rows]):
+        # "Title: X" / "Variable List:" above "name, description" lines is a README that contains a
+        # list, not a data table. The caller decides with the file extension (a .csv with a
+        # metadata preamble is still data).
+        return EMBEDDED_LIST
     if len(modal_rows) < _MIN_TABLE_ROWS:
         return 0.5
     return 1.0
+
+
+# Evidence value for "a document whose body is a delimited list" (see _has_document_preamble).
+EMBEDDED_LIST = 0.25
+
+
+def _has_document_preamble(preamble: list[str]) -> bool:
+    """True if the lines above the table are document structure: key/value metadata or headings."""
+    return any(_KEY_VALUE_RE.match(ln) or ln.rstrip().endswith(":") or ln.lstrip().startswith("#")
+               for ln in preamble)
 
 
 def sniff_text_role(text: str) -> str:

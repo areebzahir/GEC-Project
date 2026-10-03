@@ -142,7 +142,7 @@ def _classify(path: Path, head: bytes, config: PipelineConfig) -> FileRole:
 def _classify_text(path: Path, ext: str, head: bytes, config: PipelineConfig) -> FileRole:
     """Table or prose? Decided by the content; the README-ness of the name only breaks ties."""
     # Local import: tabular/__init__ imports base, which imports this module (import cycle).
-    from .tabular.classify import tabular_evidence
+    from .tabular.classify import EMBEDDED_LIST, tabular_evidence
 
     known_text = ext in DELIMITED_EXTENSIONS or ext == ""
     if not head.strip():
@@ -153,6 +153,12 @@ def _classify_text(path: Path, ext: str, head: bytes, config: PipelineConfig) ->
     evidence = tabular_evidence(decode_bytes(_cut_at_line(head), config).text)
     if evidence >= 1.0:
         return FileRole.TABULAR
+    if evidence == EMBEDDED_LIST:
+        # A list under document headings: data only if the extension says data and the name is not
+        # a README ("measurements.csv" with a notes preamble), otherwise documentation.
+        if ext in _DATA_TEXT_EXTENSIONS and _readme_score(path.name) < 0.5:
+            return FileRole.TABULAR
+        return FileRole.DOCUMENTATION
     if evidence > 0.0:  # consistent columns but only a couple of rows: let the name decide
         if _readme_score(path.name) >= 0.5:
             return FileRole.DOCUMENTATION
